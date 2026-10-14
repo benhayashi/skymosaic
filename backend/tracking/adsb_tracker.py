@@ -167,11 +167,26 @@ class ADSBTracker:
                         "version": data.get("version", "readsb/dump1090 compatible")
                     }
                 else:
+                    error_msg = f"Server responded with HTTP {resp.status_code}"
+                    if resp.status_code == 404:
+                        # Probe if the receiver is running in protobuf-only mode (readsb default)
+                        pb_url = url_to_test.replace("/data/aircraft.json", "/data/aircraft.pb")
+                        try:
+                            pb_resp = client.get(pb_url)
+                            if pb_resp.status_code == 200:
+                                error_msg = (
+                                    "readsb receiver found, but it is running in Protobuf-only mode (aircraft.pb active, aircraft.json missing). "
+                                    "To enable JSON output in Docker Compose, add to your environment: "
+                                    "- READSB_EXTRA_ARGS=--write-json /run/readsb "
+                                    "(or mount a tmpfs on /run/readsb)."
+                                )
+                        except Exception:
+                            pass
                     return {
                         "reachable": False,
                         "url_tested": url_to_test,
                         "status_code": resp.status_code,
-                        "error": f"Server responded with HTTP {resp.status_code}"
+                        "error": error_msg
                     }
         except Exception as e:
             return {
