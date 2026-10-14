@@ -786,10 +786,12 @@ input[type="range"] {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 1000;
+  z-index: 999999;
+  pointer-events: none;
 }
 
 .toast {
+  pointer-events: auto;
   background-color: var(--bg-surface-elevated);
   color: var(--text-main);
   border: 1px solid var(--border-color);

@@ -747,7 +747,13 @@ function initSettingsEvents() {
 // Add Camera Modal
 function initModalEvents() {
   const dialog = document.getElementById('modal-add-camera');
+  const errorBanner = document.getElementById('modal-cam-error');
+
   document.getElementById('btn-add-camera-dialog')?.addEventListener('click', () => {
+    if (errorBanner) {
+      errorBanner.style.display = 'none';
+      errorBanner.textContent = '';
+    }
     dialog?.showModal();
   });
   document.getElementById('btn-close-modal')?.addEventListener('click', () => dialog?.close());
@@ -755,12 +761,23 @@ function initModalEvents() {
 
   document.getElementById('form-add-camera')?.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (errorBanner) {
+      errorBanner.style.display = 'none';
+      errorBanner.textContent = '';
+    }
+
     const id = document.getElementById('new-cam-id').value.trim();
     const name = document.getElementById('new-cam-name').value.trim();
     const type = document.getElementById('new-cam-type').value;
     const url = document.getElementById('new-cam-url').value.trim();
     const az = parseFloat(document.getElementById('new-cam-az').value);
     const alt = parseFloat(document.getElementById('new-cam-alt').value);
+
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Adding...';
+    }
 
     const newCam = {
       id: id,
@@ -786,11 +803,33 @@ function initModalEvents() {
         await loadCameras();
         skyViewer.render();
       } else {
-        const err = await res.json();
-        showToast(err.detail || 'Failed to add camera', 'error');
+        let msg = 'Failed to add camera';
+        try {
+          const err = await res.json();
+          if (typeof err.detail === 'string') {
+            msg = err.detail;
+          } else if (Array.isArray(err.detail)) {
+            msg = err.detail.map(d => `${d.loc?.slice(-1)[0] || 'field'}: ${d.msg}`).join(', ');
+          }
+        } catch (_) {}
+        if (errorBanner) {
+          errorBanner.textContent = `⚠️ ${msg}`;
+          errorBanner.style.display = 'block';
+        }
+        showToast(msg, 'error');
       }
     } catch (err) {
-      showToast('Failed to add camera', 'error');
+      const errMsg = err.message || 'Network error adding camera';
+      if (errorBanner) {
+        errorBanner.textContent = `⚠️ ${errMsg}`;
+        errorBanner.style.display = 'block';
+      }
+      showToast(errMsg, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Add Camera';
+      }
     }
   });
 }
