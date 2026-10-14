@@ -139,14 +139,61 @@ class ADSBTracker:
         self.sim_gen.obs_lat = obs_cfg.latitude
         self.sim_gen.obs_lon = obs_cfg.longitude
 
+    def test_connection(self, test_url: Optional[str] = None) -> Dict:
+        """Tests live reachability of readsb/dump1090 aircraft.json endpoint."""
+        target_url = test_url or self.config.url
+        if not target_url:
+            return {"reachable": False, "error": "Endpoint URL is empty."}
+
+        # Normalize URL: if user passed http://ip:port without path, append standard readsb path
+        url_to_test = target_url.strip()
+        if not url_to_test.endswith(".json") and not url_to_test.endswith("/"):
+            url_to_test += "/data/aircraft.json"
+        elif url_to_test.endswith("/"):
+            url_to_test += "data/aircraft.json"
+
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                resp = client.get(url_to_test)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    aircraft = data.get("aircraft", [])
+                    return {
+                        "reachable": True,
+                        "url_tested": url_to_test,
+                        "aircraft_count": len(aircraft),
+                        "now": data.get("now"),
+                        "total_tracked": data.get("total", len(aircraft)),
+                        "version": data.get("version", "readsb/dump1090 compatible")
+                    }
+                else:
+                    return {
+                        "reachable": False,
+                        "url_tested": url_to_test,
+                        "status_code": resp.status_code,
+                        "error": f"Server responded with HTTP {resp.status_code}"
+                    }
+        except Exception as e:
+            return {
+                "reachable": False,
+                "url_tested": url_to_test,
+                "error": str(e)
+            }
+
     def poll_aircraft(self) -> List[Dict]:
         """Fetches aircraft and converts them to Topocentric Alt/Az coordinates."""
         raw_aircraft = []
 
         if not self.config.use_simulation and self.config.url:
+            url = self.config.url.strip()
+            if not url.endswith(".json") and not url.endswith("/"):
+                url += "/data/aircraft.json"
+            elif url.endswith("/"):
+                url += "data/aircraft.json"
+
             try:
                 with httpx.Client(timeout=2.0) as client:
-                    resp = client.get(self.config.url)
+                    resp = client.get(url)
                     if resp.status_code == 200:
                         data = resp.json()
                         raw_aircraft = data.get("aircraft", [])

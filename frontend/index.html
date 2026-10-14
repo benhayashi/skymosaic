@@ -561,6 +561,54 @@
           </div>
         </div>
 
+        <div class="card settings-card">
+          <div class="section-title-row">
+            <h2>ADS-B Airplane Transponder & Local SDR Receiver (readsb / dump1090)</h2>
+            <div id="adsb-status-badge" class="badge-pill" style="background:var(--bg-surface-elevated);border:1px solid var(--border-color);">Checking...</div>
+          </div>
+          <p class="card-caption">Connect SkyMosaic to a local RTL-SDR receiver running <code>readsb</code> or <code>sdr-enthusiasts/docker-readsb-protobuf</code> to display live callsigns, altitude, and velocity overlays on your sky dome.</p>
+          
+          <div class="form-row">
+            <div class="form-group col-8">
+              <label for="set-adsb-url">ADS-B aircraft.json Endpoint URL</label>
+              <input type="text" id="set-adsb-url" class="form-control" placeholder="http://localhost:8080/data/aircraft.json or http://192.168.1.100:8080/data/aircraft.json">
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">
+                Compatible with readsb, tar1090, dump1090-fa, sdr-enthusiasts, and FlightAware PiAware.
+              </small>
+            </div>
+            <div class="form-group col-4" style="display:flex;align-items:flex-end;">
+              <button type="button" id="btn-test-adsb-conn" class="btn btn-secondary" style="width:100%;">Test ADS-B Feed</button>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-4">
+              <label for="set-adsb-max-range">Max Range (km)</label>
+              <input type="number" id="set-adsb-max-range" min="10" max="600" class="form-control" value="250">
+              <small style="color:var(--text-dim);font-size:0.75rem;">Radius around observer to project onto the sky dome.</small>
+            </div>
+            <div class="form-group col-4">
+              <label>Operating Mode</label>
+              <div style="display:flex;align-items:center;height:38px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="set-adsb-simulation"> Use Simulation Mode
+                </label>
+              </div>
+              <small style="color:var(--text-dim);font-size:0.75rem;">Uncheck when using a real physical RTL-SDR receiver.</small>
+            </div>
+            <div class="form-group col-4">
+              <label>ADS-B Engine</label>
+              <div style="display:flex;align-items:center;height:38px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="set-adsb-enabled" checked> Enable ADS-B Tracking
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div id="adsb-test-result" style="margin-top:12px;font-size:0.85rem;color:var(--text-dim);"></div>
+        </div>
+
         <button id="btn-save-all-settings" class="btn btn-primary btn-lg">
           Save All System Settings
         </button>

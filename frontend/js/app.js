@@ -719,7 +719,47 @@ function populateSettingsForm() {
     document.getElementById('set-storage-delete-local').checked = !!appConfig.storage.delete_local_after_sync;
   }
 
+  if (appConfig.adsb) {
+    document.getElementById('set-adsb-url').value = appConfig.adsb.url || '';
+    document.getElementById('set-adsb-max-range').value = appConfig.adsb.max_range_km ?? 250;
+    document.getElementById('set-adsb-simulation').checked = !!appConfig.adsb.use_simulation;
+    document.getElementById('set-adsb-enabled').checked = !!appConfig.adsb.enabled;
+  }
+
   fetchStorageStatus();
+  fetchADSBStatus();
+}
+
+async function fetchADSBStatus() {
+  const badge = document.getElementById('adsb-status-badge');
+  if (!badge) return;
+  if (appConfig?.adsb?.use_simulation) {
+    badge.textContent = 'Simulated Traffic Active';
+    badge.style.color = 'var(--accent-info)';
+    badge.style.borderColor = 'var(--accent-info)';
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/tracking/adsb/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: appConfig?.adsb?.url || '' })
+    });
+    const data = await res.json();
+    if (data.reachable) {
+      badge.textContent = `Live Feed Online (${data.aircraft_count} flights)`;
+      badge.style.color = 'var(--accent-success)';
+      badge.style.borderColor = 'var(--accent-success)';
+    } else {
+      badge.textContent = 'Receiver Disconnected';
+      badge.style.color = 'var(--accent-danger)';
+      badge.style.borderColor = 'var(--accent-danger)';
+    }
+  } catch (_) {
+    badge.textContent = 'SDR Offline';
+    badge.style.color = 'var(--text-dim)';
+  }
 }
 
 async function fetchStorageStatus() {
@@ -836,6 +876,12 @@ function initSettingsEvents() {
     appConfig.storage.enabled = document.getElementById('set-storage-enabled').checked;
     appConfig.storage.delete_local_after_sync = document.getElementById('set-storage-delete-local').checked;
 
+    if (!appConfig.adsb) appConfig.adsb = {};
+    appConfig.adsb.url = document.getElementById('set-adsb-url').value.trim();
+    appConfig.adsb.max_range_km = parseFloat(document.getElementById('set-adsb-max-range').value) || 250.0;
+    appConfig.adsb.use_simulation = document.getElementById('set-adsb-simulation').checked;
+    appConfig.adsb.enabled = document.getElementById('set-adsb-enabled').checked;
+
     try {
       const res = await fetch('/api/config', {
         method: 'POST',
@@ -847,9 +893,35 @@ function initSettingsEvents() {
         skyViewer.render();
         updateTelemetry();
         fetchStorageStatus();
+        fetchADSBStatus();
       }
     } catch (e) {
       showToast('Failed to save settings', 'error');
+    }
+  });
+
+  document.getElementById('btn-test-adsb-conn')?.addEventListener('click', async () => {
+    const url = document.getElementById('set-adsb-url').value.trim();
+    const resultEl = document.getElementById('adsb-test-result');
+    if (resultEl) resultEl.textContent = 'Testing connection to ADS-B receiver...';
+
+    try {
+      const res = await fetch('/api/tracking/adsb/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url })
+      });
+      const data = await res.json();
+      if (data.reachable) {
+        showToast(`Connected to ADS-B receiver! ${data.aircraft_count} active flights.`, 'success');
+        if (resultEl) resultEl.innerHTML = `<span style="color:var(--accent-success);">Connected to ${data.url_tested} (${data.aircraft_count} aircraft tracked). Version: ${data.version}</span>`;
+      } else {
+        showToast(`ADS-B error: ${data.error || 'Receiver unreachable'}`, 'error');
+        if (resultEl) resultEl.innerHTML = `<span style="color:var(--accent-danger);">Failed to reach ${data.url_tested}: ${data.error}</span>`;
+      }
+      fetchADSBStatus();
+    } catch (e) {
+      showToast('Network error testing ADS-B connection', 'error');
     }
   });
 }

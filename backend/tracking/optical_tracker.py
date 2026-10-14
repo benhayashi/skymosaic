@@ -69,7 +69,9 @@ class OpticalTrackerEngine:
 
     def update_config(self, config: SkyViewConfig) -> None:
         self.config = config
+        self.adsb_tracker.config = config.adsb
         self.adsb_tracker.update_observer(config.observer)
+        self.satellite_tracker.config = config.satellites
         self.satellite_tracker.update_observer(config.observer)
         self.weather_plugin.enabled = config.plugins.weather_enabled
         self.object_plugin.enabled = config.plugins.daytime_detector_enabled

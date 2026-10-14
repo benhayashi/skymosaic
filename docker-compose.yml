@@ -1,3 +1,19 @@
+# ==============================================================================
+# SkyMosaic — Full Multi-Container Compose with Optional Local RTL-SDR Receiver
+# ==============================================================================
+# This setup bundles:
+#   1. skymosaic: The all-sky camera and stargazing platform
+#   2. readsb (Optional): High-performance Mode-S/ADS-B decoder (sdr-enthusiasts)
+#      requiring an RTL-SDR USB dongle on 1090 MHz.
+#
+# Usage:
+#   - To start only SkyMosaic:
+#       docker compose up -d skymosaic
+#
+#   - To start SkyMosaic with the local RTL-SDR ADS-B decoder (plug in RTL-SDR first):
+#       docker compose --profile adsb up -d
+# ==============================================================================
+
 services:
   skymosaic:
     build:
@@ -9,15 +25,52 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # Persist configuration and astronomical media outputs across updates
+      # Persist configuration, astronomical media outputs, and test shots
       - ./data:/app/data
-      # Optional: Share timezone from host
+      # Share timezone from host
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
-    # Optional: For local USB/V4L2 cameras on Linux host, uncomment the devices section:
+    # Optional: For local USB/V4L2 cameras on Linux host, uncomment:
     # devices:
     #   - /dev/video0:/dev/video0
     #   - /dev/video1:/dev/video1
     environment:
       - PYTHONUNBUFFERED=1
       - PORT=8080
+
+  # ----------------------------------------------------------------------------
+  # Local RTL-SDR ADS-B Receiver via SDR-Enthusiasts readsb-protobuf
+  # Activated with: docker compose --profile adsb up -d
+  # ----------------------------------------------------------------------------
+  readsb:
+    image: ghcr.io/sdr-enthusiasts/docker-readsb-protobuf:latest
+    container_name: skymosaic-readsb
+    restart: unless-stopped
+    profiles: ["adsb"]
+    ports:
+      # Web radar map & aircraft.json endpoint
+      - "8085:8080"
+      # Beast raw output
+      - "30005:30005"
+      # SBS BaseStation output
+      - "30003:30003"
+    environment:
+      - TZ=UTC
+      - READSB_LAT=40.7128
+      - READSB_LON=-74.0060
+      - READSB_ALT=10m
+      - READSB_RX_LOCATION_ACCURACY=2
+      - READSB_STATS_RANGE=true
+      - READSB_GAIN=autogain
+      - READSB_RTLSDR_DEVICE=0
+      - READSB_JSON_INTERVAL=1.0
+      - READSB_NET_BEAST_INPUT_PORT=30004
+      - READSB_NET_RAW_INPUT_PORT=30001
+    volumes:
+      - readsb-data:/run/readsb
+    # Pass through RTL-SDR USB hardware dongle to container
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+
+volumes:
+  readsb-data:

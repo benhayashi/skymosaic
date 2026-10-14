@@ -124,10 +124,19 @@ def get_tracked_targets():
     return output
 
 
+class TestADSBRequest(BaseModel):
+    url: Optional[str] = None
+
+
 @app.get("/api/tracking/adsb")
 def get_adsb_aircraft():
     aircraft = tracker_engine.adsb_tracker.poll_aircraft()
     return {"count": len(aircraft), "aircraft": aircraft}
+
+
+@app.post("/api/tracking/adsb/test")
+def test_adsb_connection(req: TestADSBRequest):
+    return tracker_engine.adsb_tracker.test_connection(req.url)
 
 
 @app.get("/api/tracking/satellites")
