@@ -1,0 +1,23 @@
+services:
+  skymosaic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: skymosaic:latest
+    container_name: skymosaic
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist configuration and astronomical media outputs across updates
+      - ./data:/app/data
+      # Optional: Share timezone from host
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    # Optional: For local USB/V4L2 cameras on Linux host, uncomment the devices section:
+    # devices:
+    #   - /dev/video0:/dev/video0
+    #   - /dev/video1:/dev/video1
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PORT=8080

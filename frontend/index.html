@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SkyMosaic — Multi-Camera AllSky System</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body class="theme-dark">
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+          <path d="M2 12h20"/>
+          <circle cx="12" cy="12" r="3" fill="currentColor"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="brand-title">SkyMosaic</h1>
+        <p class="brand-subtitle">Multi-Camera AllSky & Celestial Stargazer System</p>
+      </div>
+    </div>
+
+    <nav class="nav-tabs" role="tablist">
+      <button class="tab-btn active" data-tab="tab-skyview" role="tab" aria-selected="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
+        Sky Dome
+      </button>
+      <button class="tab-btn" data-tab="tab-calibration" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><line x1="12" y1="9" x2="19" y2="7"/><line x1="12" y1="15" x2="5" y2="17"/></svg>
+        Calibration Studio
+      </button>
+      <button class="tab-btn" data-tab="tab-cameras" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        Cameras (<span id="camera-count-badge">3</span>)
+      </button>
+      <button class="tab-btn" data-tab="tab-gallery" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        Archive & Products
+      </button>
+      <button class="tab-btn" data-tab="tab-settings" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
+    </nav>
+
+    <div class="mode-selector">
+      <button id="btn-mode-feed" class="mode-btn active" title="Continuous real-time video stream with live tracking">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Feed Mode
+      </button>
+      <button id="btn-mode-timelapse" class="mode-btn" title="Long-duration exposures for celestial events">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Timelapse Mode
+      </button>
+    </div>
+
+    <div class="header-actions">
+      <button id="btn-night-mode" class="btn btn-outline" title="Toggle red night vision mode for dark skies">
+        <span class="red-dot"></span> Night Mode
+      </button>
+      <button id="btn-capture-now" class="btn btn-primary">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/></svg>
+        Snapshot
+      </button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- TAB 1: LIVE SKY DOME -->
+    <section id="tab-skyview" class="tab-pane active" role="tabpanel">
+      <!-- Live Weather & Sky Conditions Banner -->
+      <div class="weather-banner">
+        <div class="weather-item">
+          <span class="weather-label">Sky Condition</span>
+          <span id="weath-condition" class="weather-val">Analyzing...</span>
+        </div>
+        <div class="weather-item">
+          <span class="weather-label">Cloud Cover</span>
+          <span id="weath-clouds" class="weather-val">--% (-- octas)</span>
+        </div>
+        <div class="weather-item">
+          <span class="weather-label">Sun Elevation</span>
+          <span id="weath-sun-alt" class="weather-val">--° (Night)</span>
+        </div>
+        <div class="weather-item">
+          <span class="weather-label">Sky Clarity</span>
+          <span id="weath-clarity" class="weather-val">--%</span>
+        </div>
+        <div class="weather-item">
+          <span class="weather-label">Airspace Activity</span>
+          <span id="weath-targets" class="weather-val">0 targets</span>
+        </div>
+      </div>
+
+      <div class="skyview-container">
+        <div class="skyview-viewport">
+          <div class="viewport-toolbar">
+            <div class="toolbar-group">
+              <span class="status-indicator online"></span>
+              <span id="live-mode-badge" class="toolbar-label">FEED MODE (30 FPS)</span>
+            </div>
+            <div class="toolbar-group">
+              <label class="toggle-checkbox">
+                <input type="checkbox" id="toggle-tracking" checked>
+                <span class="tracking-toggle-label">🎯 Radar & Tracking</span>
+              </label>
+              <label class="toggle-checkbox">
+                <input type="checkbox" id="toggle-annotations" checked>
+                <span>Compass & Rings</span>
+              </label>
+              <label class="toggle-checkbox">
+                <input type="checkbox" id="toggle-constellations">
+                <span>Constellations</span>
+              </label>
+              <button id="btn-fullscreen" class="btn-icon" title="Full Screen">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="canvas-wrapper">
+            <canvas id="sky-canvas" width="1200" height="1200"></canvas>
+            <div id="sky-loader" class="canvas-loader hidden">
+              <div class="spinner"></div>
+              <span>Stitching feeds...</span>
+            </div>
+          </div>
+
+          <div class="telemetry-bar">
+            <div class="telemetry-item">
+              <span class="telemetry-label">Observer</span>
+              <span id="tel-observer" class="telemetry-value">40.71° N, 74.01° W</span>
+            </div>
+            <div class="telemetry-item">
+              <span class="telemetry-label">Local Sidereal</span>
+              <span id="tel-lst" class="telemetry-value">--:--:--</span>
+            </div>
+            <div class="telemetry-item">
+              <span class="telemetry-label">Active Feeds</span>
+              <span id="tel-cams" class="telemetry-value">3 cameras</span>
+            </div>
+            <div class="telemetry-item">
+              <span class="telemetry-label">Projection</span>
+              <span id="tel-proj" class="telemetry-value">Zenithal Polar Dome</span>
+            </div>
+          </div>
+        </div>
+
+        <aside class="skyview-sidebar">
+          <div class="card">
+            <div class="card-header-flex">
+              <h3 class="card-title">Aerial & Celestial Targets</h3>
+              <span id="badge-target-count" class="badge-pill">0</span>
+            </div>
+            <div id="sidebar-targets-list" class="targets-scroll-list">
+              <!-- Dynamically populated targets -->
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Multi-Camera Status</h3>
+            <div id="sidebar-camera-list" class="mini-camera-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Quick Actions</h3>
+            <div class="action-buttons-column">
+              <button id="btn-trigger-timelapse" class="btn btn-secondary">
+                Generate 24h Timelapse
+              </button>
+              <button id="btn-trigger-keogram" class="btn btn-secondary">
+                Generate Today's Keogram
+              </button>
+              <button id="btn-trigger-startrails" class="btn btn-secondary">
+                Stack Startrails
+              </button>
+            </div>
+          </div>
+
+
+          <div class="card">
+            <h3 class="card-title">Live Stream Endpoints</h3>
+            <div class="stream-links">
+              <div class="link-row">
+                <span>MJPEG Stream:</span>
+                <a href="/api/sky/stream" target="_blank" class="badge-link">/api/sky/stream</a>
+              </div>
+              <div class="link-row">
+                <span>Single Frame:</span>
+                <a href="/api/sky/live.jpg" target="_blank" class="badge-link">/api/sky/live.jpg</a>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- TAB 2: CALIBRATION STUDIO -->
+    <section id="tab-calibration" class="tab-pane" role="tabpanel">
+      <div class="studio-layout">
+        <aside class="studio-controls-panel">
+          <div class="card">
+            <h3 class="card-title">Camera & Test Shot</h3>
+            <div class="form-group">
+              <label for="calib-camera-select">Target Camera</label>
+              <select id="calib-camera-select" class="form-control"></select>
+            </div>
+            <div class="button-row">
+              <button id="btn-calib-grab-frame" class="btn btn-primary btn-sm">Grab Live Frame</button>
+              <button id="btn-calib-test-shot" class="btn btn-secondary btn-sm">Capture Snapshot</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Celestial Timestamp</h3>
+            <div class="form-group">
+              <label for="calib-time-input">UTC Capture Time</label>
+              <input type="datetime-local" id="calib-time-input" class="form-control">
+            </div>
+            <button id="btn-calib-time-now" class="btn btn-outline btn-sm">Set to Current UTC</button>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Camera Orientation</h3>
+            <div class="slider-control">
+              <div class="slider-header">
+                <span>Azimuth (Compass Heading)</span>
+                <span id="val-azimuth">0.0°</span>
+              </div>
+              <input type="range" id="slider-azimuth" min="0" max="360" step="0.5" value="0">
+              <div class="slider-labels"><span>0° N</span><span>90° E</span><span>180° S</span><span>270° W</span><span>360°</span></div>
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-header">
+                <span>Altitude (Elevation Tilt)</span>
+                <span id="val-altitude">45.0°</span>
+              </div>
+              <input type="range" id="slider-altitude" min="-10" max="90" step="0.5" value="45">
+              <div class="slider-labels"><span>-10°</span><span>0° Horizon</span><span>45°</span><span>90° Zenith</span></div>
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-header">
+                <span>Roll (Rotation Angle)</span>
+                <span id="val-roll">0.0°</span>
+              </div>
+              <input type="range" id="slider-roll" min="-180" max="180" step="0.5" value="0">
+              <div class="slider-labels"><span>-180°</span><span>-90°</span><span>0°</span><span>90°</span><span>180°</span></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Lens Model & Optics</h3>
+            <div class="form-group">
+              <label for="calib-lens-model">Lens Model</label>
+              <select id="calib-lens-model" class="form-control">
+                <option value="rectilinear">Rectilinear (Standard CCTV/Security)</option>
+                <option value="fisheye_equidistant">Fisheye Equidistant (r = f * θ)</option>
+                <option value="fisheye_equisolid">Fisheye Equisolid (r = 2f * sin(θ/2))</option>
+                <option value="fisheye_stereographic">Fisheye Stereographic</option>
+                <option value="fisheye_orthographic">Fisheye Orthographic</option>
+              </select>
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-header">
+                <span>Field of View (FOV)</span>
+                <span id="val-fov">85.0°</span>
+              </div>
+              <input type="range" id="slider-fov" min="20" max="220" step="0.5" value="85">
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-header">
+                <span>Radial Distortion (k1)</span>
+                <span id="val-k1">0.00</span>
+              </div>
+              <input type="range" id="slider-k1" min="-0.5" max="0.5" step="0.01" value="0">
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Star Matching Tool</h3>
+            <p class="card-caption">Click 2 or 3 bright stars on the image, select their names, and click Solve.</p>
+            <div class="button-row">
+              <button id="btn-detect-stars" class="btn btn-outline btn-sm">Detect Star Peaks</button>
+              <button id="btn-solve-pose" class="btn btn-primary btn-sm">Solve Pose & FOV</button>
+            </div>
+            <div id="star-matches-list" class="matches-table-container">
+              <!-- Matched star rows -->
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Horizon & Obstacle Mask</h3>
+            <p class="card-caption">Draw a polygon over roofs, chimneys, or trees to mask them out of the sky dome.</p>
+            <div class="button-row">
+              <button id="btn-start-mask" class="btn btn-secondary btn-sm">Draw Mask</button>
+              <button id="btn-clear-mask" class="btn btn-outline btn-sm">Clear Mask</button>
+            </div>
+          </div>
+
+          <div class="save-bar">
+            <button id="btn-save-camera-calib" class="btn btn-primary btn-lg w-100">
+              Save Calibration & Update Dome
+            </button>
+          </div>
+        </aside>
+
+        <div class="studio-viewport-panel">
+          <div class="studio-viewport-header">
+            <div class="toolbar-group">
+              <label class="toggle-checkbox">
+                <input type="checkbox" id="calib-toggle-stars" checked>
+                <span>Planetarium Stars</span>
+              </label>
+              <label class="toggle-checkbox">
+                <input type="checkbox" id="calib-toggle-constellations" checked>
+                <span>Constellations</span>
+              </label>
+              <label class="toggle-checkbox">
+                <input type="checkbox" id="calib-toggle-names" checked>
+                <span>Star Names</span>
+              </label>
+              <label class="toggle-checkbox">
+                <input type="checkbox" id="calib-toggle-mask" checked>
+                <span>Show Mask</span>
+              </label>
+            </div>
+            <div class="toolbar-group">
+              <span id="calib-coords-tooltip" class="coord-tooltip">X: 0, Y: 0</span>
+            </div>
+          </div>
+
+          <div class="studio-canvas-container">
+            <canvas id="calib-canvas"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: CAMERAS & FEEDS -->
+    <section id="tab-cameras" class="tab-pane" role="tabpanel">
+      <div class="cameras-layout">
+        <div class="section-header">
+          <div>
+            <h2>Configured Camera Feeds</h2>
+            <p class="section-desc">Manage physical RTSP, USB, Allsky directory watchers, or synthetic simulation cameras.</p>
+          </div>
+          <button id="btn-add-camera-dialog" class="btn btn-primary">
+            + Add Camera Feed
+          </button>
+        </div>
+
+        <div id="cameras-grid" class="cameras-grid">
+          <!-- Dynamically populated camera cards -->
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: ARCHIVE & PRODUCTS -->
+    <section id="tab-gallery" class="tab-pane" role="tabpanel">
+      <div class="gallery-layout">
+        <div class="section-header">
+          <div>
+            <h2>Archive & Astronomical Products</h2>
+            <p class="section-desc">Inspect stitched night sky snapshots, timelapses, keograms, and startrail stacks.</p>
+          </div>
+          <button id="btn-refresh-gallery" class="btn btn-secondary">
+            Refresh Gallery
+          </button>
+        </div>
+
+        <div class="gallery-subtabs">
+          <button class="gallery-subtab active" data-subtab="subtab-snapshots">Snapshots (<span id="count-snapshots">0</span>)</button>
+          <button class="gallery-subtab" data-subtab="subtab-timelapses">Timelapses (<span id="count-timelapses">0</span>)</button>
+          <button class="gallery-subtab" data-subtab="subtab-keograms">Keograms (<span id="count-keograms">0</span>)</button>
+          <button class="gallery-subtab" data-subtab="subtab-startrails">Startrails (<span id="count-startrails">0</span>)</button>
+          <button class="gallery-subtab" data-subtab="subtab-unidentified">Unidentified Events (<span id="count-unidentified">0</span>)</button>
+        </div>
+
+        <div id="subtab-snapshots" class="gallery-content active">
+          <div id="gallery-grid-snapshots" class="gallery-grid"></div>
+        </div>
+        <div id="subtab-timelapses" class="gallery-content">
+          <div id="gallery-grid-timelapses" class="gallery-grid"></div>
+        </div>
+        <div id="subtab-keograms" class="gallery-content">
+          <div id="gallery-grid-keograms" class="gallery-grid"></div>
+        </div>
+        <div id="subtab-startrails" class="gallery-content">
+          <div id="gallery-grid-startrails" class="gallery-grid"></div>
+        </div>
+        <div id="subtab-unidentified" class="gallery-content">
+          <div id="gallery-grid-unidentified" class="unidentified-events-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: SETTINGS -->
+    <section id="tab-settings" class="tab-pane" role="tabpanel">
+      <div class="settings-layout">
+        <div class="card settings-card">
+          <h2>Observer Geographic Location</h2>
+          <p class="card-caption">Crucial for calculating celestial star Alt/Az positions and Local Sidereal Time.</p>
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="set-lat">Latitude (decimal degrees, + North)</label>
+              <input type="number" id="set-lat" step="0.0001" class="form-control" value="40.7128">
+            </div>
+            <div class="form-group col-6">
+              <label for="set-lon">Longitude (decimal degrees, + East, - West)</label>
+              <input type="number" id="set-lon" step="0.0001" class="form-control" value="-74.0060">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="set-elevation">Elevation (meters)</label>
+              <input type="number" id="set-elevation" class="form-control" value="10">
+            </div>
+            <div class="form-group col-6">
+              <label for="set-tz">Timezone</label>
+              <input type="text" id="set-tz" class="form-control" value="UTC">
+            </div>
+          </div>
+        </div>
+
+        <div class="card settings-card">
+          <h2>Stitching & Canvas Output</h2>
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="set-projection">Projection Geometry</label>
+              <select id="set-projection" class="form-control">
+                <option value="zenithal_polar">Zenithal Polar (Standard Circular AllSky Dome)</option>
+                <option value="equirectangular">Equirectangular (360° x 90° Cylindrical Panorama)</option>
+              </select>
+            </div>
+            <div class="form-group col-6">
+              <label for="set-canvas-size">Target Resolution</label>
+              <select id="set-canvas-size" class="form-control">
+                <option value="800">800 x 800 (Fast / Low Power)</option>
+                <option value="1200" selected>1200 x 1200 (Balanced HD)</option>
+                <option value="1920">1920 x 1920 (High Resolution)</option>
+                <option value="2560">2560 x 2560 (Ultra QHD)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="set-feather">Seam Feathering Width (pixels)</label>
+              <input type="number" id="set-feather" class="form-control" value="25">
+            </div>
+            <div class="form-group col-6">
+              <label for="set-horizon-clip">Dome Horizon Radius Fraction</label>
+              <input type="number" id="set-horizon-clip" step="0.01" min="0.5" max="1.0" class="form-control" value="0.98">
+            </div>
+          </div>
+        </div>
+
+        <div class="card settings-card">
+          <h2>Pipeline & Automation</h2>
+          <div class="form-row">
+            <div class="form-group col-4">
+              <label for="set-capture-interval">Snapshot Interval (seconds)</label>
+              <input type="number" id="set-capture-interval" class="form-control" value="10">
+            </div>
+            <div class="form-group col-4">
+              <label for="set-timelapse-fps">Timelapse FPS</label>
+              <input type="number" id="set-timelapse-fps" class="form-control" value="25">
+            </div>
+            <div class="form-group col-4">
+              <label for="set-startrails-thresh">Startrail Sensitivity</label>
+              <input type="number" id="set-startrails-thresh" step="0.01" class="form-control" value="0.05">
+            </div>
+          </div>
+        </div>
+
+        <button id="btn-save-all-settings" class="btn btn-primary btn-lg">
+          Save All System Settings
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ADD CAMERA MODAL DIALOG -->
+  <dialog id="modal-add-camera" class="app-dialog">
+    <div class="dialog-header">
+      <h3>Add New Camera Feed</h3>
+      <button id="btn-close-modal" class="btn-icon">&times;</button>
+    </div>
+    <form id="form-add-camera" class="dialog-form">
+      <div class="form-group">
+        <label for="new-cam-id">Camera ID (slug)</label>
+        <input type="text" id="new-cam-id" class="form-control" placeholder="cam_east" required>
+      </div>
+      <div class="form-group">
+        <label for="new-cam-name">Display Name</label>
+        <input type="text" id="new-cam-name" class="form-control" placeholder="East Sky Camera" required>
+      </div>
+      <div class="form-group">
+        <label for="new-cam-type">Feed Type</label>
+        <select id="new-cam-type" class="form-control">
+          <option value="synthetic">Synthetic / Simulated Night Sky</option>
+          <option value="rtsp">RTSP Stream (rtsp://ip:port/...)</option>
+          <option value="usb">USB / V4L2 Device (/dev/video0)</option>
+          <option value="directory">Allsky Directory Watcher (local folder)</option>
+        </select>
+      </div>
+      <div class="form-group" id="group-cam-url">
+        <label for="new-cam-url">URL / Device Path / Directory</label>
+        <input type="text" id="new-cam-url" class="form-control" placeholder="rtsp://admin:pass@192.168.1.50:554/stream1">
+      </div>
+      <div class="form-row">
+        <div class="form-group col-6">
+          <label for="new-cam-az">Initial Azimuth (deg)</label>
+          <input type="number" id="new-cam-az" class="form-control" value="90">
+        </div>
+        <div class="form-group col-6">
+          <label for="new-cam-alt">Initial Altitude (deg)</label>
+          <input type="number" id="new-cam-alt" class="form-control" value="45">
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="btn-cancel-modal" class="btn btn-outline">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Camera</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- TOAST NOTIFICATIONS CONTAINER -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- SCRIPTS -->
+  <script src="/js/sky_viewer.js"></script>
+  <script src="/js/calibration_studio.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

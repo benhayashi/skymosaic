@@ -1,0 +1,822 @@
+// Global SkyView Application Controller
+
+let appConfig = null;
+let camerasList = [];
+let skyViewer = null;
+let calibrationStudio = null;
+
+document.addEventListener('DOMContentLoaded', async () => {
+  initNightMode();
+  initTabs();
+
+  skyViewer = new SkyViewer('sky-canvas');
+  calibrationStudio = new CalibrationStudio('calib-canvas');
+
+  await loadSystemConfig();
+  await loadCameras();
+
+  initCalibrationEvents();
+  initActionButtons();
+  initSettingsEvents();
+  initModalEvents();
+  initModeSwitcher();
+  startTrackingPoller();
+
+  // Start live sky view
+  skyViewer.start();
+  updateTelemetry();
+  setInterval(updateTelemetry, 5000);
+});
+
+
+// Toast notification helper
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(100%)';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
+// Night mode toggle
+function initNightMode() {
+  const btn = document.getElementById('btn-night-mode');
+  const isNight = localStorage.getItem('skyview_night_mode') === 'true';
+  if (isNight) document.body.classList.add('theme-night-red');
+
+  btn?.addEventListener('click', () => {
+    const active = document.body.classList.toggle('theme-night-red');
+    localStorage.setItem('skyview_night_mode', active);
+  });
+}
+
+// Tab navigation
+function initTabs() {
+  const tabButtons = document.querySelectorAll('.tab-btn');
+  tabButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabButtons.forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+      });
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+      btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
+      const targetId = btn.getAttribute('data-tab');
+      document.getElementById(targetId)?.classList.add('active');
+
+      if (targetId === 'tab-skyview') {
+        skyViewer.render();
+      } else if (targetId === 'tab-calibration') {
+        calibrationStudio.render();
+      } else if (targetId === 'tab-gallery') {
+        loadGallery();
+      }
+    });
+  });
+
+  // Gallery subtabs
+  const subtabs = document.querySelectorAll('.gallery-subtab');
+  subtabs.forEach(st => {
+    st.addEventListener('click', () => {
+      subtabs.forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.gallery-content').forEach(c => c.classList.remove('active'));
+
+      st.classList.add('active');
+      const subtargetId = st.getAttribute('data-subtab');
+      document.getElementById(subtargetId)?.classList.add('active');
+    });
+  });
+}
+
+// Config & Cameras API
+async function loadSystemConfig() {
+  try {
+    const res = await fetch('/api/config');
+    if (res.ok) {
+      appConfig = await res.json();
+      populateSettingsForm();
+    }
+  } catch (e) {
+    showToast('Failed to load system configuration', 'error');
+  }
+}
+
+async function loadCameras() {
+  try {
+    const res = await fetch('/api/cameras');
+    if (!res.ok) return;
+
+    camerasList = await res.json();
+    document.getElementById('camera-count-badge').textContent = camerasList.length;
+
+    renderCamerasList();
+    renderMiniCameraList();
+    populateCalibrationCameraSelect();
+
+    if (camerasList.length > 0 && !calibrationStudio.activeCamera) {
+      calibrationStudio.setCamera(camerasList[0].config);
+    }
+  } catch (e) {
+    console.error("Failed to load cameras:", e);
+  }
+}
+
+function renderMiniCameraList() {
+  const container = document.getElementById('sidebar-camera-list');
+  if (!container) return;
+
+  container.innerHTML = '';
+  camerasList.forEach(item => {
+    const cam = item.config;
+    const row = document.createElement('div');
+    row.className = 'mini-cam-row';
+    row.innerHTML = `
+      <span>${cam.name}</span>
+      <span style="color:var(--text-dim);font-family:var(--font-mono);">${cam.extrinsics.azimuth_deg}° Az / ${cam.extrinsics.altitude_deg}° Alt</span>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function renderCamerasList() {
+  const container = document.getElementById('cameras-grid');
+  if (!container) return;
+
+  container.innerHTML = '';
+  camerasList.forEach(item => {
+    const cam = item.config;
+    const card = document.createElement('div');
+    card.className = 'camera-card';
+    card.innerHTML = `
+      <img src="/api/cameras/${cam.id}/frame?t=${Date.now()}" class="camera-preview-thumb" alt="${cam.name}">
+      <div class="camera-card-body">
+        <div class="camera-card-title">
+          <span>${cam.name}</span>
+          <span class="status-indicator online"></span>
+        </div>
+        <div class="camera-meta">
+          <div>ID: ${cam.id} | Type: ${cam.source_type}</div>
+          <div>Pointing: ${cam.extrinsics.azimuth_deg}° Az, ${cam.extrinsics.altitude_deg}° Alt, ${cam.extrinsics.roll_deg}° Roll</div>
+          <div>Lens: ${cam.intrinsics.lens_model} (${cam.intrinsics.fov_deg}° FOV)</div>
+        </div>
+        <div class="camera-actions">
+          <button class="btn btn-secondary btn-sm" onclick="openCalibrationFor('${cam.id}')">Calibrate</button>
+          <button class="btn btn-outline btn-sm" style="color:var(--accent-danger);" onclick="deleteCameraFeed('${cam.id}')">Delete</button>
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function populateCalibrationCameraSelect() {
+  const sel = document.getElementById('calib-camera-select');
+  if (!sel) return;
+
+  sel.innerHTML = '';
+  camerasList.forEach(item => {
+    const opt = document.createElement('option');
+    opt.value = item.config.id;
+    opt.textContent = `${item.config.name} (${item.config.id})`;
+    sel.appendChild(opt);
+  });
+}
+
+window.openCalibrationFor = function(cameraId) {
+  const target = camerasList.find(c => c.config.id === cameraId);
+  if (target) {
+    document.querySelector('.tab-btn[data-tab="tab-calibration"]')?.click();
+    document.getElementById('calib-camera-select').value = cameraId;
+    calibrationStudio.setCamera(target.config);
+  }
+};
+
+window.deleteCameraFeed = async function(cameraId) {
+  if (!confirm(`Are you sure you want to delete camera '${cameraId}'?`)) return;
+  try {
+    const res = await fetch(`/api/cameras/${cameraId}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Camera deleted successfully', 'success');
+      await loadCameras();
+      skyViewer.render();
+    }
+  } catch (e) {
+    showToast('Failed to delete camera', 'error');
+  }
+};
+
+// Calibration Studio UI events
+function initCalibrationEvents() {
+  document.getElementById('calib-camera-select')?.addEventListener('change', (e) => {
+    const target = camerasList.find(c => c.config.id === e.target.value);
+    if (target) calibrationStudio.setCamera(target.config);
+  });
+
+  document.getElementById('btn-calib-grab-frame')?.addEventListener('click', () => {
+    if (calibrationStudio.activeCamera) {
+      calibrationStudio.loadCameraTestFrame(calibrationStudio.activeCamera.id);
+      showToast('Latest frame grabbed', 'info');
+    }
+  });
+
+  document.getElementById('btn-calib-test-shot')?.addEventListener('click', async () => {
+    if (!calibrationStudio.activeCamera) return;
+    try {
+      const res = await fetch(`/api/cameras/${calibrationStudio.activeCamera.id}/test_shot`, { method: 'POST' });
+      if (res.ok) {
+        showToast('Snapshot saved to test_shots directory', 'success');
+      }
+    } catch (e) {
+      showToast('Failed to save snapshot', 'error');
+    }
+  });
+
+  document.getElementById('btn-calib-time-now')?.addEventListener('click', () => {
+    const now = new Date();
+    document.getElementById('calib-time-input').value = now.toISOString().slice(0, 16);
+    calibrationStudio.fetchStars();
+  });
+
+  document.getElementById('calib-time-input')?.addEventListener('change', () => {
+    calibrationStudio.fetchStars();
+  });
+
+  // Sliders real-time binding
+  const bindSlider = (id, valId, prop, isFloat = true, step = 1) => {
+    const slider = document.getElementById(id);
+    const label = document.getElementById(valId);
+    slider?.addEventListener('input', (e) => {
+      const val = isFloat ? parseFloat(e.target.value) : parseInt(e.target.value);
+      label.textContent = isFloat ? `${val.toFixed(step === 0.01 ? 2 : 1)}°` : `${val}`;
+      if (step === 0.01) label.textContent = val.toFixed(2);
+      calibrationStudio[prop] = val;
+      calibrationStudio.render();
+    });
+  };
+
+  bindSlider('slider-azimuth', 'val-azimuth', 'azimuth');
+  bindSlider('slider-altitude', 'val-altitude', 'altitude');
+  bindSlider('slider-roll', 'val-roll', 'roll');
+  bindSlider('slider-fov', 'val-fov', 'fov');
+  bindSlider('slider-k1', 'val-k1', 'k1', true, 0.01);
+
+  document.getElementById('calib-lens-model')?.addEventListener('change', (e) => {
+    calibrationStudio.lensModel = e.target.value;
+    calibrationStudio.render();
+  });
+
+  // Toggles
+  document.getElementById('calib-toggle-stars')?.addEventListener('change', (e) => {
+    calibrationStudio.showStars = e.target.checked;
+    calibrationStudio.render();
+  });
+  document.getElementById('calib-toggle-constellations')?.addEventListener('change', (e) => {
+    calibrationStudio.showConstellations = e.target.checked;
+    calibrationStudio.render();
+  });
+  document.getElementById('calib-toggle-names')?.addEventListener('change', (e) => {
+    calibrationStudio.showStarNames = e.target.checked;
+    calibrationStudio.render();
+  });
+  document.getElementById('calib-toggle-mask')?.addEventListener('change', (e) => {
+    calibrationStudio.showMask = e.target.checked;
+    calibrationStudio.render();
+  });
+
+  // Star Matching
+  document.getElementById('btn-detect-stars')?.addEventListener('click', async () => {
+    if (!calibrationStudio.activeCamera) return;
+    try {
+      const res = await fetch('/api/calibration/detect_stars', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera_id: calibrationStudio.activeCamera.id })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`Detected ${data.count} star peaks!`, 'success');
+      }
+    } catch (e) {
+      showToast('Error detecting stars', 'error');
+    }
+  });
+
+  document.getElementById('btn-solve-pose')?.addEventListener('click', async () => {
+    const sol = await calibrationStudio.solvePose();
+    if (sol && sol.success) {
+      showToast(`Pose solved! RMS Error: ${sol.rms_error_px} px`, 'success');
+    }
+  });
+
+  // Mask drawing
+  document.getElementById('btn-start-mask')?.addEventListener('click', (e) => {
+    calibrationStudio.isDrawingMask = !calibrationStudio.isDrawingMask;
+    e.target.textContent = calibrationStudio.isDrawingMask ? 'Finish Mask' : 'Draw Mask';
+    if (!calibrationStudio.isDrawingMask) {
+      calibrationStudio.polygonMask = [...calibrationStudio.maskPoints];
+      showToast('Obstacle polygon mask set', 'info');
+    }
+  });
+
+  document.getElementById('btn-clear-mask')?.addEventListener('click', () => {
+    calibrationStudio.maskPoints = [];
+    calibrationStudio.polygonMask = [];
+    calibrationStudio.render();
+    showToast('Mask cleared', 'info');
+  });
+
+  // Save Calibration
+  document.getElementById('btn-save-camera-calib')?.addEventListener('click', async () => {
+    if (!calibrationStudio.activeCamera) return;
+
+    const cam = calibrationStudio.activeCamera;
+    cam.extrinsics.azimuth_deg = calibrationStudio.azimuth;
+    cam.extrinsics.altitude_deg = calibrationStudio.altitude;
+    cam.extrinsics.roll_deg = calibrationStudio.roll;
+    cam.intrinsics.fov_deg = calibrationStudio.fov;
+    cam.intrinsics.lens_model = calibrationStudio.lensModel;
+    cam.intrinsics.k1 = calibrationStudio.k1;
+    cam.polygon_mask = calibrationStudio.polygonMask;
+
+    try {
+      const res = await fetch(`/api/cameras/${cam.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cam)
+      });
+      if (res.ok) {
+        showToast(`Saved calibration for ${cam.name}! Dome updated.`, 'success');
+        await loadCameras();
+        skyViewer.render();
+      } else {
+        throw new Error('Save failed');
+      }
+    } catch (e) {
+      showToast('Failed to save calibration', 'error');
+    }
+  });
+}
+
+// Action buttons (Snapshot, Timelapse, Keogram, Startrails)
+function initActionButtons() {
+  document.getElementById('btn-capture-now')?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/pipeline/capture_now', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`Stitched snapshot saved: ${data.filename}`, 'success');
+      }
+    } catch (e) {
+      showToast('Failed to capture snapshot', 'error');
+    }
+  });
+
+  document.getElementById('btn-trigger-timelapse')?.addEventListener('click', async () => {
+    showToast('Generating MP4 Timelapse in background...', 'info');
+    try {
+      const res = await fetch('/api/pipeline/generate_timelapse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fps: 25 })
+      });
+      if (res.ok) {
+        showToast('Timelapse generated successfully! Check Archive tab.', 'success');
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Timelapse failed', 'error');
+      }
+    } catch (e) {
+      showToast('Error generating timelapse', 'error');
+    }
+  });
+
+  document.getElementById('btn-trigger-keogram')?.addEventListener('click', async () => {
+    showToast('Generating Keogram...', 'info');
+    try {
+      const res = await fetch('/api/pipeline/generate_keogram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slice_width: 2 })
+      });
+      if (res.ok) {
+        showToast('Keogram generated successfully! Check Archive tab.', 'success');
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Keogram failed', 'error');
+      }
+    } catch (e) {
+      showToast('Error generating keogram', 'error');
+    }
+  });
+
+  document.getElementById('btn-trigger-startrails')?.addEventListener('click', async () => {
+    showToast('Stacking Startrails...', 'info');
+    try {
+      const res = await fetch('/api/pipeline/generate_startrails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold: 0.05 })
+      });
+      if (res.ok) {
+        showToast('Startrails image created! Check Archive tab.', 'success');
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Startrails failed', 'error');
+      }
+    } catch (e) {
+      showToast('Error stacking startrails', 'error');
+    }
+  });
+
+  document.getElementById('toggle-tracking')?.addEventListener('change', (e) => {
+    skyViewer.showTracking = e.target.checked;
+    skyViewer.render();
+  });
+
+  document.getElementById('toggle-annotations')?.addEventListener('change', (e) => {
+    skyViewer.showAnnotations = e.target.checked;
+    skyViewer.fetchFrame();
+  });
+
+  document.getElementById('toggle-constellations')?.addEventListener('change', (e) => {
+    skyViewer.showConstellations = e.target.checked;
+    skyViewer.render();
+  });
+
+  document.getElementById('btn-fullscreen')?.addEventListener('click', () => {
+    const canvas = document.getElementById('sky-canvas');
+    if (!document.fullscreenElement) {
+      canvas.requestFullscreen().catch(err => alert(`Fullscreen error: ${err.message}`));
+    } else {
+      document.exitFullscreen();
+    }
+  });
+}
+
+// Mode Switcher (Feed vs Long-Exposure / Timelapse)
+function initModeSwitcher() {
+  const btnFeed = document.getElementById('btn-mode-feed');
+  const btnTimelapse = document.getElementById('btn-mode-timelapse');
+  const badge = document.getElementById('live-mode-badge');
+
+  const setModeUI = (mode) => {
+    if (mode === 'feed') {
+      btnFeed?.classList.add('active');
+      btnTimelapse?.classList.remove('active');
+      if (badge) badge.textContent = 'FEED MODE (30 FPS)';
+      skyViewer.pollInterval = 1000;
+    } else {
+      btnTimelapse?.classList.add('active');
+      btnFeed?.classList.remove('active');
+      if (badge) badge.textContent = 'TIMELAPSE / LONG-EXPOSURE MODE';
+      skyViewer.pollInterval = 5000;
+    }
+  };
+
+  btnFeed?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'feed' })
+      });
+      if (res.ok) {
+        setModeUI('feed');
+        showToast('Switched to Feed Mode (High FPS, Optical Tracking)', 'info');
+      }
+    } catch (e) {
+      showToast('Failed to switch mode', 'error');
+    }
+  });
+
+  btnTimelapse?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'long_exposure' })
+      });
+      if (res.ok) {
+        setModeUI('long_exposure');
+        showToast('Switched to Timelapse / Long-Exposure Mode', 'info');
+      }
+    } catch (e) {
+      showToast('Failed to switch mode', 'error');
+    }
+  });
+}
+
+// Optical Tracking & Radar Poller
+function startTrackingPoller() {
+  const pollTargets = async () => {
+    try {
+      const [targetsRes, weatherRes] = await Promise.all([
+        fetch('/api/tracking/targets'),
+        fetch('/api/weather/sky_conditions')
+      ]);
+
+      if (targetsRes.ok) {
+        const data = await targetsRes.json();
+        skyViewer.targets = data.targets || [];
+        skyViewer.render();
+        updateTargetsList(data.targets || []);
+      }
+
+      if (weatherRes.ok) {
+        const data = await weatherRes.json();
+        updateWeatherBanner(data.weather, data.sun);
+      }
+    } catch (e) {
+      // Quiet fail during network reloads
+    }
+  };
+
+  pollTargets();
+  setInterval(pollTargets, 1800);
+}
+
+function updateTargetsList(targets) {
+  const container = document.getElementById('sidebar-targets-list');
+  const countBadge = document.getElementById('badge-target-count');
+  const weathTargets = document.getElementById('weath-targets');
+
+  if (countBadge) countBadge.textContent = targets.length;
+  if (weathTargets) weathTargets.textContent = `${targets.length} targets`;
+  if (!container) return;
+
+  if (targets.length === 0) {
+    container.innerHTML = '<div style="color:var(--text-dim);padding:8px;font-size:0.75rem;">No active targets in field of view.</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+  targets.forEach(t => {
+    const row = document.createElement('div');
+    row.className = `target-item cat-${t.category}`;
+
+    let icon = '🟡';
+    if (t.category === 'airplane') icon = '✈';
+    else if (t.category === 'satellite') icon = '🛰';
+    else if (t.category === 'unidentified') icon = '⚠';
+    else if (t.category === 'vision_ai') icon = '👁';
+
+    let extraInfo = `${t.altitude_deg.toFixed(1)}° Alt, ${t.azimuth_deg.toFixed(1)}° Az`;
+    if (t.speed_kts) extraInfo += ` | ${t.speed_kts} kts`;
+    if (t.speed_deg_s > 0) extraInfo += ` | ${t.speed_deg_s}°/s`;
+
+    row.innerHTML = `
+      <div>
+        <div style="font-weight:600;">${icon} ${t.label}</div>
+        <div class="target-meta-sub">${extraInfo}</div>
+      </div>
+      <span class="badge-pill" style="background:${t.color};color:#000;">${t.category.toUpperCase()}</span>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function updateWeatherBanner(weather, sun) {
+  if (!weather || !sun) return;
+  const condEl = document.getElementById('weath-condition');
+  const cloudEl = document.getElementById('weath-clouds');
+  const sunEl = document.getElementById('weath-sun-alt');
+  const clarityEl = document.getElementById('weath-clarity');
+
+  if (condEl) condEl.textContent = weather.condition || 'Analyzing...';
+  if (cloudEl) cloudEl.textContent = `${weather.cloud_cover_percent}% (${weather.cloud_cover_octas})`;
+  if (sunEl) {
+    const stateStr = sun.sky_state ? sun.sky_state.replace('_', ' ').toUpperCase() : '';
+    sunEl.textContent = `${sun.altitude_deg}° (${stateStr})`;
+  }
+  if (clarityEl) clarityEl.textContent = `${weather.clarity_score}%`;
+}
+
+// Gallery loader
+async function loadGallery() {
+  try {
+    const [galleryRes, uapRes] = await Promise.all([
+      fetch('/api/gallery'),
+      fetch('/api/events/unidentified')
+    ]);
+
+    if (galleryRes.ok) {
+      const data = await galleryRes.json();
+      document.getElementById('count-snapshots').textContent = data.snapshots.length;
+      document.getElementById('count-timelapses').textContent = data.timelapses.length;
+      document.getElementById('count-keograms').textContent = data.keograms.length;
+      document.getElementById('count-startrails').textContent = data.startrails.length;
+
+      const renderGrid = (containerId, items, isVideo = false) => {
+        const c = document.getElementById(containerId);
+        if (!c) return;
+        if (items.length === 0) {
+          c.innerHTML = '<div style="color:var(--text-dim);padding:20px;">No files generated yet.</div>';
+          return;
+        }
+        c.innerHTML = '';
+        items.forEach(item => {
+          const card = document.createElement('div');
+          card.className = 'gallery-card';
+          if (isVideo) {
+            card.innerHTML = `
+              <video src="${item.url}" controls class="gallery-thumb"></video>
+              <div class="gallery-card-body">
+                <div class="gallery-filename">${item.name}</div>
+                <a href="${item.url}" download class="badge-link">Download MP4</a>
+              </div>
+            `;
+          } else {
+            card.innerHTML = `
+              <a href="${item.url}" target="_blank">
+                <img src="${item.url}" class="gallery-thumb" alt="${item.name}" loading="lazy">
+              </a>
+              <div class="gallery-card-body">
+                <div class="gallery-filename">${item.name}</div>
+                <a href="${item.url}" download class="badge-link">Download Image</a>
+              </div>
+            `;
+          }
+          c.appendChild(card);
+        });
+      };
+
+      renderGrid('gallery-grid-snapshots', data.snapshots);
+      renderGrid('gallery-grid-timelapses', data.timelapses, true);
+      renderGrid('gallery-grid-keograms', data.keograms);
+      renderGrid('gallery-grid-startrails', data.startrails);
+    }
+
+    if (uapRes.ok) {
+      const uapData = await uapRes.json();
+      const countEl = document.getElementById('count-unidentified');
+      if (countEl) countEl.textContent = uapData.count;
+
+      const uapContainer = document.getElementById('gallery-grid-unidentified');
+      if (uapContainer) {
+        if (uapData.events.length === 0) {
+          uapContainer.innerHTML = '<div style="color:var(--text-dim);padding:20px;">No anomalous or unidentified aerial events recorded.</div>';
+        } else {
+          uapContainer.innerHTML = '';
+          uapData.events.forEach(ev => {
+            const row = document.createElement('div');
+            row.className = 'uap-event-card';
+            row.innerHTML = `
+              <div>
+                <div class="uap-event-title">⚠ UNIDENTIFIED AERIAL TARGET #${ev.track_id}</div>
+                <div class="uap-event-meta">
+                  Timestamp: ${ev.timestamp} | Point: (${ev.pixel_x}, ${ev.pixel_y})<br>
+                  Pointing: ${ev.altitude_deg}° Alt, ${ev.azimuth_deg}° Az | Angular Speed: ${ev.angular_speed_deg_s}°/sec
+                </div>
+              </div>
+              <span class="badge-pill" style="background:var(--accent-danger);color:#fff;">UNIDENTIFIED</span>
+            `;
+            uapContainer.appendChild(row);
+          });
+        }
+      }
+    }
+  } catch (e) {
+    showToast('Failed to load gallery', 'error');
+  }
+}
+
+
+// Settings form
+function populateSettingsForm() {
+  if (!appConfig) return;
+  document.getElementById('set-lat').value = appConfig.observer.latitude;
+  document.getElementById('set-lon').value = appConfig.observer.longitude;
+  document.getElementById('set-elevation').value = appConfig.observer.elevation_m;
+  document.getElementById('set-tz').value = appConfig.observer.timezone_str;
+
+  document.getElementById('set-projection').value = appConfig.stitching.projection;
+  document.getElementById('set-canvas-size').value = appConfig.stitching.canvas_size;
+  document.getElementById('set-feather').value = appConfig.stitching.feather_pixels;
+  document.getElementById('set-horizon-clip').value = appConfig.stitching.horizon_mask_radius;
+
+  document.getElementById('set-capture-interval').value = appConfig.pipeline.capture_interval_sec;
+  document.getElementById('set-timelapse-fps').value = appConfig.pipeline.timelapse_fps;
+  document.getElementById('set-startrails-thresh').value = appConfig.pipeline.startrails_threshold;
+}
+
+function initSettingsEvents() {
+  document.getElementById('btn-save-all-settings')?.addEventListener('click', async () => {
+    if (!appConfig) return;
+
+    appConfig.observer.latitude = parseFloat(document.getElementById('set-lat').value);
+    appConfig.observer.longitude = parseFloat(document.getElementById('set-lon').value);
+    appConfig.observer.elevation_m = parseFloat(document.getElementById('set-elevation').value);
+    appConfig.observer.timezone_str = document.getElementById('set-tz').value;
+
+    appConfig.stitching.projection = document.getElementById('set-projection').value;
+    appConfig.stitching.canvas_size = parseInt(document.getElementById('set-canvas-size').value);
+    appConfig.stitching.feather_pixels = parseInt(document.getElementById('set-feather').value);
+    appConfig.stitching.horizon_mask_radius = parseFloat(document.getElementById('set-horizon-clip').value);
+
+    appConfig.pipeline.capture_interval_sec = parseFloat(document.getElementById('set-capture-interval').value);
+    appConfig.pipeline.timelapse_fps = parseInt(document.getElementById('set-timelapse-fps').value);
+    appConfig.pipeline.startrails_threshold = parseFloat(document.getElementById('set-startrails-thresh').value);
+
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(appConfig)
+      });
+      if (res.ok) {
+        showToast('Settings saved successfully', 'success');
+        skyViewer.render();
+        updateTelemetry();
+      }
+    } catch (e) {
+      showToast('Failed to save settings', 'error');
+    }
+  });
+}
+
+// Add Camera Modal
+function initModalEvents() {
+  const dialog = document.getElementById('modal-add-camera');
+  document.getElementById('btn-add-camera-dialog')?.addEventListener('click', () => {
+    dialog?.showModal();
+  });
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => dialog?.close());
+  document.getElementById('btn-cancel-modal')?.addEventListener('click', () => dialog?.close());
+
+  document.getElementById('form-add-camera')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('new-cam-id').value.trim();
+    const name = document.getElementById('new-cam-name').value.trim();
+    const type = document.getElementById('new-cam-type').value;
+    const url = document.getElementById('new-cam-url').value.trim();
+    const az = parseFloat(document.getElementById('new-cam-az').value);
+    const alt = parseFloat(document.getElementById('new-cam-alt').value);
+
+    const newCam = {
+      id: id,
+      name: name,
+      source_type: type,
+      url_or_path: url,
+      enabled: true,
+      extrinsics: { azimuth_deg: az, altitude_deg: alt, roll_deg: 0.0 },
+      intrinsics: { lens_model: 'rectilinear', fov_deg: 85.0, fov_axis: 'horizontal', k1: 0.0 },
+      polygon_mask: []
+    };
+
+    try {
+      const res = await fetch('/api/cameras', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCam)
+      });
+      if (res.ok) {
+        showToast(`Camera '${name}' added!`, 'success');
+        dialog?.close();
+        e.target.reset();
+        await loadCameras();
+        skyViewer.render();
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to add camera', 'error');
+      }
+    } catch (err) {
+      showToast('Failed to add camera', 'error');
+    }
+  });
+}
+
+// Telemetry updater
+function updateTelemetry() {
+  if (!appConfig) return;
+  const obs = appConfig.observer;
+  const latStr = `${Math.abs(obs.latitude).toFixed(2)}° ${obs.latitude >= 0 ? 'N' : 'S'}`;
+  const lonStr = `${Math.abs(obs.longitude).toFixed(2)}° ${obs.longitude >= 0 ? 'E' : 'W'}`;
+  document.getElementById('tel-observer').textContent = `${latStr}, ${lonStr}`;
+
+  // Approximate Local Sidereal Time
+  const now = new Date();
+  const utcHours = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+  // Day of year approximation for LST
+  const startOfYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  const dayOfYear = (now - startOfYear) / 86400000;
+  const gmst = (18.697374558 + 24.06570982441908 * dayOfYear + utcHours) % 24;
+  const lstHours = (gmst + obs.longitude / 15.0 + 24) % 24;
+
+  const h = Math.floor(lstHours).toString().padStart(2, '0');
+  const m = Math.floor((lstHours * 60) % 60).toString().padStart(2, '0');
+  const s = Math.floor((lstHours * 3600) % 60).toString().padStart(2, '0');
+  document.getElementById('tel-lst').textContent = `${h}:${m}:${s}`;
+  document.getElementById('tel-cams').textContent = `${camerasList.length} cameras`;
+  document.getElementById('tel-proj').textContent =
+    appConfig.stitching.projection === 'zenithal_polar' ? 'Zenithal Polar Dome' : 'Equirectangular Panorama';
+}

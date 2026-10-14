@@ -1,0 +1,176 @@
+{
+  "mode": "feed",
+  "observer": {
+    "name": "Primary Station",
+    "latitude": 40.7128,
+    "longitude": -74.006,
+    "elevation_m": 10.0,
+    "timezone_str": "UTC"
+  },
+  "cameras": [
+    {
+      "id": "cam_north",
+      "name": "North Sky Camera",
+      "source_type": "synthetic",
+      "url_or_path": "",
+      "enabled": true,
+      "extrinsics": {
+        "azimuth_deg": 0.0,
+        "altitude_deg": 45.0,
+        "roll_deg": 0.0
+      },
+      "intrinsics": {
+        "lens_model": "rectilinear",
+        "fov_deg": 85.0,
+        "fov_axis": "horizontal",
+        "center_offset_x": 0.0,
+        "center_offset_y": 0.0,
+        "k1": -0.05,
+        "k2": 0.0,
+        "p1": 0.0,
+        "p2": 0.0
+      },
+      "polygon_mask": [
+        [
+          0.0,
+          0.85
+        ],
+        [
+          1.0,
+          0.85
+        ],
+        [
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ],
+      "gain_scale": 1.0
+    },
+    {
+      "id": "cam_southeast",
+      "name": "South-East Sky Camera",
+      "source_type": "synthetic",
+      "url_or_path": "",
+      "enabled": true,
+      "extrinsics": {
+        "azimuth_deg": 120.0,
+        "altitude_deg": 45.0,
+        "roll_deg": 0.0
+      },
+      "intrinsics": {
+        "lens_model": "rectilinear",
+        "fov_deg": 85.0,
+        "fov_axis": "horizontal",
+        "center_offset_x": 0.0,
+        "center_offset_y": 0.0,
+        "k1": -0.05,
+        "k2": 0.0,
+        "p1": 0.0,
+        "p2": 0.0
+      },
+      "polygon_mask": [
+        [
+          0.0,
+          0.85
+        ],
+        [
+          1.0,
+          0.85
+        ],
+        [
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ],
+      "gain_scale": 1.0
+    },
+    {
+      "id": "cam_southwest",
+      "name": "South-West Sky Camera",
+      "source_type": "synthetic",
+      "url_or_path": "",
+      "enabled": true,
+      "extrinsics": {
+        "azimuth_deg": 240.0,
+        "altitude_deg": 45.0,
+        "roll_deg": 0.0
+      },
+      "intrinsics": {
+        "lens_model": "rectilinear",
+        "fov_deg": 85.0,
+        "fov_axis": "horizontal",
+        "center_offset_x": 0.0,
+        "center_offset_y": 0.0,
+        "k1": -0.05,
+        "k2": 0.0,
+        "p1": 0.0,
+        "p2": 0.0
+      },
+      "polygon_mask": [
+        [
+          0.0,
+          0.85
+        ],
+        [
+          1.0,
+          0.85
+        ],
+        [
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ],
+      "gain_scale": 1.0
+    }
+  ],
+  "stitching": {
+    "projection": "zenithal_polar",
+    "canvas_size": 1200,
+    "feather_pixels": 25,
+    "exposure_balance": true,
+    "horizon_mask_radius": 0.98
+  },
+  "pipeline": {
+    "capture_interval_sec": 10.0,
+    "long_exposure_duration_sec": 15.0,
+    "timelapse_fps": 25,
+    "keogram_slice_axis": "vertical",
+    "startrails_threshold": 0.05
+  },
+  "adsb": {
+    "enabled": true,
+    "url": "http://localhost:8080/data/aircraft.json",
+    "max_range_km": 250.0,
+    "use_simulation": true
+  },
+  "satellites": {
+    "enabled": true,
+    "max_magnitude": 4.5,
+    "update_interval_sec": 2.0,
+    "use_simulation": true
+  },
+  "tracking": {
+    "enabled": true,
+    "min_motion_pixels": 2.5,
+    "match_tolerance_deg": 2.5,
+    "uap_auto_record": true
+  },
+  "plugins": {
+    "weather_enabled": true,
+    "daytime_detector_enabled": true,
+    "meteor_detector_enabled": true
+  },
+  "data_dir": "data"
+}
