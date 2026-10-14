@@ -116,6 +116,15 @@
               <span id="live-mode-badge" class="toolbar-label">FEED MODE (30 FPS)</span>
             </div>
             <div class="toolbar-group">
+              <label class="toggle-checkbox" title="Toggle timestamp banner on live view">
+                <input type="checkbox" id="toggle-timestamp" checked>
+                <span>🕒 Timestamp</span>
+              </label>
+              <!-- Time standard selection: Zulu (UTC) vs Local -->
+              <div class="time-format-pills" title="Switch timestamp standard between Zulu (UTC) and Local Time">
+                <button id="btn-time-zulu" class="time-pill-btn active" data-time-fmt="zulu">ZULU (UTC)</button>
+                <button id="btn-time-local" class="time-pill-btn" data-time-fmt="local">LOCAL</button>
+              </div>
               <label class="toggle-checkbox">
                 <input type="checkbox" id="toggle-tracking" checked>
                 <span class="tracking-toggle-label">🎯 Radar & Tracking</span>
@@ -498,6 +507,54 @@
               <input type="number" id="set-horizon-clip" step="0.01" min="0.5" max="1.0" class="form-control" value="0.98">
             </div>
           </div>
+        </div>
+
+        <div class="card settings-card">
+          <div class="section-title-row">
+            <h2>Network Time Protocol (NTP) & Final View Timestamp</h2>
+            <div id="ntp-status-badge" class="badge-pill" style="background:var(--bg-surface-elevated);border:1px solid var(--border-color);">Checking NTP...</div>
+          </div>
+          <p class="card-caption">Synchronizes microsecond-accurate astronomical time from atomic clocks via UDP NTP/SNTP (RFC 4330) for timestamp overlays and ephemeris calculations.</p>
+
+          <div class="form-row">
+            <div class="form-group col-8">
+              <label for="set-ntp-server">NTP Time Server</label>
+              <input type="text" id="set-ntp-server" class="form-control" value="pool.ntp.org" placeholder="pool.ntp.org or time.google.com or time.cloudflare.com">
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">
+                Compatible with any public or local stratum-1/stratum-2 NTP server or router.
+              </small>
+            </div>
+            <div class="form-group col-4" style="display:flex;align-items:flex-end;">
+              <button type="button" id="btn-sync-ntp-now" class="btn btn-secondary" style="width:100%;">Sync NTP Time Now</button>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-4">
+              <label for="set-time-format">Timestamp Time Standard</label>
+              <select id="set-time-format" class="form-control">
+                <option value="zulu">Zulu Time (UTC / GMT)</option>
+                <option value="local">Local Observer Time</option>
+              </select>
+            </div>
+            <div class="form-group col-4">
+              <label>Timestamp Overlay</label>
+              <div style="display:flex;align-items:center;height:38px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="set-overlay-timestamp" checked> Show Timestamp on Final View
+                </label>
+              </div>
+            </div>
+            <div class="form-group col-4">
+              <label>NTP Clock Discipline</label>
+              <div style="display:flex;align-items:center;height:38px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="set-ntp-enabled" checked> Enable NTP Network Sync
+                </label>
+              </div>
+            </div>
+          </div>
+          <div id="ntp-status-details" style="font-size:0.8rem;color:var(--text-dim);margin-top:6px;font-family:var(--font-mono);"></div>
         </div>
 
         <div class="card settings-card">

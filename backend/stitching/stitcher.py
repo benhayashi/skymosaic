@@ -10,6 +10,7 @@ from backend.stitching.warp_lut import (
     compute_camera_remap_lut,
     generate_target_world_grid,
 )
+from backend.tracking.ntp_client import NTPClient
 
 
 class CameraLUTData:
@@ -34,6 +35,12 @@ class MultiCameraStitcher:
         self._cached_projection: str = ""
         self._valid_canvas_mask: Optional[np.ndarray] = None
         self._camera_dims: Dict[str, Tuple[int, int]] = {}
+        self.ntp_client = NTPClient(server=config.stitching.ntp_server)
+        if config.stitching.ntp_enabled:
+            try:
+                self.ntp_client.sync()
+            except Exception:
+                pass
 
     def invalidate_lut_cache(self) -> None:
         """Clears precomputed lookup tables so they will be recomputed with new settings."""
@@ -193,5 +200,40 @@ class MultiCameraStitcher:
         cv2.putText(annotated, "S", (cx - 6, cy + r_max - 12), font, scale, color, thickness, cv2.LINE_AA)
         # West (left)
         cv2.putText(annotated, "W", (cx - r_max + 12, cy + 6), font, scale, color, thickness, cv2.LINE_AA)
+
+        # Render NTP-synchronized timestamp overlay if enabled
+        if getattr(self.config.stitching, "overlay_timestamp", True):
+            time_fmt = getattr(self.config.stitching, "time_format", "zulu")
+            tz_str = getattr(self.config.observer, "timezone_str", "UTC")
+            ts_str = self.ntp_client.format_timestamp(time_fmt, tz_str)
+
+            # Draw semi-transparent pill / badge at bottom-left
+            t_scale = 0.50
+            t_thick = 1
+            t_font = cv2.FONT_HERSHEY_SIMPLEX
+            (text_w, text_h), baseline = cv2.getTextSize(ts_str, t_font, t_scale, t_thick)
+            
+            # Bottom-left margin
+            px = 16
+            py = h - 16
+            
+            # Background badge
+            cv2.rectangle(
+                annotated,
+                (px - 6, py - text_h - 6),
+                (px + text_w + 6, py + baseline + 4),
+                (10, 15, 25),
+                cv2.FILLED
+            )
+            cv2.rectangle(
+                annotated,
+                (px - 6, py - text_h - 6),
+                (px + text_w + 6, py + baseline + 4),
+                (45, 60, 80),
+                1,
+                cv2.LINE_AA
+            )
+            # Text
+            cv2.putText(annotated, ts_str, (px, py), t_font, t_scale, (200, 240, 255), t_thick, cv2.LINE_AA)
 
         return annotated

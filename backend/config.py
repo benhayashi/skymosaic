@@ -73,6 +73,11 @@ class StitchingConfig(BaseModel):
     feather_pixels: int = Field(default=25, description="Overlap feathering width in pixels")
     exposure_balance: bool = Field(default=True, description="Enable automatic cross-camera brightness normalization")
     horizon_mask_radius: float = Field(default=0.98, description="Fraction of radius to clip at dome horizon")
+    overlay_timestamp: bool = Field(default=True, description="Render live timestamp overlay onto final stitched view")
+    time_format: str = Field(default="zulu", description="'zulu' (UTC / Z) or 'local' (Observer timezone)")
+    ntp_enabled: bool = Field(default=True, description="Synchronize timestamp from Network Time Protocol (NTP)")
+    ntp_server: str = Field(default="pool.ntp.org", description="NTP server address")
+
 
 
 class OperatingMode(str, Enum):

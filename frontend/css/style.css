@@ -991,6 +991,41 @@ input[type="range"] {
   box-shadow: 0 0 6px rgba(99, 102, 241, 0.4);
 }
 
+/* TIME FORMAT PILLS (ZULU VS LOCAL) */
+.time-format-pills {
+  display: inline-flex;
+  background-color: var(--bg-main);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  gap: 2px;
+}
+
+.time-pill-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.70rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  touch-action: manipulation;
+}
+
+.time-pill-btn:hover {
+  color: var(--text-main);
+}
+
+.time-pill-btn.active {
+  background-color: var(--accent-secondary);
+  color: #000;
+  box-shadow: 0 0 6px rgba(6, 182, 212, 0.4);
+}
+
+
 /* LOCATION ACTION BAR */
 .location-action-bar {
   display: flex;

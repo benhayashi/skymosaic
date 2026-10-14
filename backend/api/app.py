@@ -145,6 +145,30 @@ def get_satellites():
     return {"count": len(sats), "satellites": sats}
 
 
+class NTPSyncRequest(BaseModel):
+    server: Optional[str] = None
+
+
+@app.get("/api/time/ntp")
+def get_ntp_status():
+    status = stitcher.ntp_client.get_status()
+    tz_str = app_config.observer.timezone_str
+    status["zulu_time"] = stitcher.ntp_client.format_timestamp("zulu")
+    status["local_time"] = stitcher.ntp_client.format_timestamp("local", tz_str)
+    status["time_format"] = app_config.stitching.time_format
+    status["overlay_timestamp"] = app_config.stitching.overlay_timestamp
+    return status
+
+
+@app.post("/api/time/sync")
+def trigger_ntp_sync(req: Optional[NTPSyncRequest] = None):
+    srv = req.server if req and req.server else app_config.stitching.ntp_server
+    success = stitcher.ntp_client.sync(srv)
+    status = stitcher.ntp_client.get_status()
+    return {"success": success, "status": status}
+
+
+
 @app.get("/api/weather/sky_conditions")
 def get_sky_conditions():
     frames = stream_manager.get_all_active_frames()
@@ -322,13 +346,32 @@ def solve_calibration_endpoint(req: SolveCalibrationRequest):
 
 
 @app.get("/api/sky/live.jpg")
-def get_live_stitched_frame(overlay: bool = True):
+def get_live_stitched_frame(
+    overlay: bool = True,
+    timestamp: Optional[bool] = None,
+    time_format: Optional[str] = None
+):
     frames = stream_manager.get_all_active_frames()
-    composite = stitcher.stitch_frames(frames, overlay_annotations=overlay)
+    # Temporarily override stitcher timestamp settings if query params provided
+    orig_ts = stitcher.config.stitching.overlay_timestamp
+    orig_fmt = stitcher.config.stitching.time_format
+
+    if timestamp is not None:
+        stitcher.config.stitching.overlay_timestamp = timestamp
+    if time_format is not None:
+        stitcher.config.stitching.time_format = time_format
+
+    try:
+        composite = stitcher.stitch_frames(frames, overlay_annotations=overlay)
+    finally:
+        stitcher.config.stitching.overlay_timestamp = orig_ts
+        stitcher.config.stitching.time_format = orig_fmt
+
     ret, jpeg = cv2.imencode(".jpg", composite, [cv2.IMWRITE_JPEG_QUALITY, 88])
     if not ret:
         raise HTTPException(status_code=500, detail="Failed to encode composite.")
     return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+
 
 
 def mjpeg_stream_generator():

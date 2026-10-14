@@ -5,10 +5,11 @@ class SkyViewer {
     this.img = new Image();
     this.isRunning = false;
     this.pollInterval = 2000; // 2 seconds
-    this.timer = null;
     this.showAnnotations = true;
     this.showConstellations = false;
     this.showTracking = true;
+    this.showTimestamp = true;
+    this.timeFormat = 'zulu'; // 'zulu' or 'local'
     this.unitSystem = 'metric'; // 'metric' or 'us'
     this.stars = [];
     this.constellations = [];
@@ -23,6 +24,16 @@ class SkyViewer {
   setUnitSystem(unit) {
     this.unitSystem = unit;
     this.render();
+  }
+
+  setTimeFormat(fmt) {
+    this.timeFormat = fmt;
+    this.fetchFrame();
+  }
+
+  setShowTimestamp(show) {
+    this.showTimestamp = show;
+    this.fetchFrame();
   }
 
   start() {
@@ -41,10 +52,12 @@ class SkyViewer {
 
   fetchFrame() {
     if (!this.isRunning) return;
-    // Cache-bust timestamp
+    // Cache-bust timestamp with overlay options
     const overlayParam = this.showAnnotations ? 'true' : 'false';
-    this.img.src = `/api/sky/live.jpg?overlay=${overlayParam}&t=${Date.now()}`;
+    const tsParam = this.showTimestamp ? 'true' : 'false';
+    this.img.src = `/api/sky/live.jpg?overlay=${overlayParam}&timestamp=${tsParam}&time_format=${this.timeFormat}&t=${Date.now()}`;
 
+    if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.fetchFrame();
     }, this.pollInterval);

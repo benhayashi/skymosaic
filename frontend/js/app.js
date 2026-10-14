@@ -548,6 +548,42 @@ function initActionButtons() {
     skyViewer.render();
   });
 
+  // Timestamp and Time Standard (Zulu vs Local)
+  const toggleTimestampEl = document.getElementById('toggle-timestamp');
+  toggleTimestampEl?.addEventListener('change', (e) => {
+    skyViewer.setShowTimestamp(e.target.checked);
+    const cbSettings = document.getElementById('set-overlay-timestamp');
+    if (cbSettings) cbSettings.checked = e.target.checked;
+  });
+
+  const btnZulu = document.getElementById('btn-time-zulu');
+  const btnLocal = document.getElementById('btn-time-local');
+  const selectTimeFormat = document.getElementById('set-time-format');
+
+  const setTimeStandard = (fmt, syncSettings = true) => {
+    skyViewer.setTimeFormat(fmt);
+    localStorage.setItem('skyview_time_format', fmt);
+
+    if (btnZulu && btnLocal) {
+      if (fmt === 'zulu') {
+        btnZulu.classList.add('active');
+        btnLocal.classList.remove('active');
+      } else {
+        btnLocal.classList.add('active');
+        btnZulu.classList.remove('active');
+      }
+    }
+
+    if (syncSettings && selectTimeFormat) {
+      selectTimeFormat.value = fmt;
+    }
+    showToast(`Time standard switched to ${fmt === 'zulu' ? 'Zulu Time (UTC / Z)' : 'Local Observer Time'}`, 'info');
+  };
+
+  btnZulu?.addEventListener('click', () => setTimeStandard('zulu'));
+  btnLocal?.addEventListener('click', () => setTimeStandard('local'));
+  selectTimeFormat?.addEventListener('change', (e) => setTimeStandard(e.target.value, false));
+
   document.getElementById('btn-fullscreen')?.addEventListener('click', () => {
     const canvas = document.getElementById('sky-canvas');
     if (!document.fullscreenElement) {
@@ -557,6 +593,7 @@ function initActionButtons() {
     }
   });
 }
+
 
 // Mode Switcher (Feed vs Long-Exposure / Timelapse vs Test Preview)
 function initModeSwitcher() {
@@ -872,9 +909,65 @@ function populateSettingsForm() {
     document.getElementById('set-adsb-enabled').checked = !!appConfig.adsb.enabled;
   }
 
+  if (appConfig.stitching) {
+    document.getElementById('set-overlay-timestamp').checked = appConfig.stitching.overlay_timestamp !== false;
+    document.getElementById('set-time-format').value = appConfig.stitching.time_format || 'zulu';
+    document.getElementById('set-ntp-enabled').checked = appConfig.stitching.ntp_enabled !== false;
+    document.getElementById('set-ntp-server').value = appConfig.stitching.ntp_server || 'pool.ntp.org';
+    
+    // Sync toolbar button state
+    const fmt = appConfig.stitching.time_format || 'zulu';
+    const btnZulu = document.getElementById('btn-time-zulu');
+    const btnLocal = document.getElementById('btn-time-local');
+    if (btnZulu && btnLocal) {
+      if (fmt === 'zulu') {
+        btnZulu.classList.add('active');
+        btnLocal.classList.remove('active');
+      } else {
+        btnLocal.classList.add('active');
+        btnZulu.classList.remove('active');
+      }
+    }
+    const cbToolbar = document.getElementById('toggle-timestamp');
+    if (cbToolbar) cbToolbar.checked = appConfig.stitching.overlay_timestamp !== false;
+  }
+
   fetchStorageStatus();
   fetchADSBStatus();
+  fetchNTPStatus();
 }
+
+async function fetchNTPStatus() {
+  const badge = document.getElementById('ntp-status-badge');
+  const details = document.getElementById('ntp-status-details');
+  if (!badge) return;
+
+  try {
+    const res = await fetch('/api/time/ntp');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.synced) {
+        badge.textContent = `NTP Synced (Offset: ${data.offset_ms}ms)`;
+        badge.style.color = 'var(--accent-success)';
+        badge.style.borderColor = 'var(--accent-success)';
+        if (details) {
+          details.innerHTML = `Active NTP Server: <code>${data.server}</code> | Clock Offset: <strong>${data.offset_ms} ms</strong> | Zulu: ${data.zulu_time} | Local: ${data.local_time}`;
+        }
+      } else {
+        badge.textContent = data.error ? 'NTP Error / Unsynced' : 'NTP Not Synchronized';
+        badge.style.color = 'var(--accent-warning)';
+        badge.style.borderColor = 'var(--accent-warning)';
+        if (details) {
+          details.textContent = data.error ? `Sync error: ${data.error}. Using local system clock.` : 'Using local system clock.';
+        }
+      }
+    }
+  } catch (_) {
+    badge.textContent = 'NTP Service Offline';
+    badge.style.color = 'var(--text-dim)';
+  }
+}
+
 
 async function fetchADSBStatus() {
   const badge = document.getElementById('adsb-status-badge');
@@ -1029,6 +1122,12 @@ function initSettingsEvents() {
     appConfig.adsb.use_simulation = document.getElementById('set-adsb-simulation').checked;
     appConfig.adsb.enabled = document.getElementById('set-adsb-enabled').checked;
 
+    if (!appConfig.stitching) appConfig.stitching = {};
+    appConfig.stitching.overlay_timestamp = document.getElementById('set-overlay-timestamp').checked;
+    appConfig.stitching.time_format = document.getElementById('set-time-format').value;
+    appConfig.stitching.ntp_enabled = document.getElementById('set-ntp-enabled').checked;
+    appConfig.stitching.ntp_server = document.getElementById('set-ntp-server').value.trim() || 'pool.ntp.org';
+
     try {
       const res = await fetch('/api/config', {
         method: 'POST',
@@ -1041,9 +1140,34 @@ function initSettingsEvents() {
         updateTelemetry();
         fetchStorageStatus();
         fetchADSBStatus();
+        fetchNTPStatus();
       }
     } catch (e) {
       showToast('Failed to save settings', 'error');
+    }
+  });
+
+  document.getElementById('btn-sync-ntp-now')?.addEventListener('click', async () => {
+    const srv = document.getElementById('set-ntp-server').value.trim() || 'pool.ntp.org';
+    const badge = document.getElementById('ntp-status-badge');
+    if (badge) badge.textContent = 'Syncing NTP...';
+
+    try {
+      const res = await fetch('/api/time/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ server: srv })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Synchronized with NTP server ${srv}! Offset: ${data.status.offset_ms}ms`, 'success');
+      } else {
+        showToast(`NTP sync failed: ${data.status.error || 'Server unreachable'}`, 'error');
+      }
+      fetchNTPStatus();
+      skyViewer.fetchFrame();
+    } catch (e) {
+      showToast('Network error triggering NTP sync', 'error');
     }
   });
 
