@@ -76,8 +76,9 @@ class StitchingConfig(BaseModel):
 
 
 class OperatingMode(str, Enum):
-    FEED = "feed"                    # Real-time high-FPS stream with live object tracking
+    FEED = "feed"                    # Real-time high-FPS stream with live object tracking & recording
     LONG_EXPOSURE = "long_exposure"  # Longer duration stacked exposures for celestial events
+    LIVE_TESTING = "live_testing"    # Test preview mode: live stream and overlays active, ZERO disk writes / recording paused
 
 
 class ADSBConfig(BaseModel):

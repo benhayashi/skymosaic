@@ -313,8 +313,12 @@ class OpticalTrackerEngine:
                     "telemetry": uap_record
                 })
 
-                # Log event once per track
-                if not any(e["track_id"] == track.track_id for e in self._unidentified_events):
+                # Log event once per track (suppressed if in live_testing mode or auto_record is disabled)
+                recording_enabled = (
+                    self.config.mode != OperatingMode.LIVE_TESTING
+                    and self.config.tracking.uap_auto_record
+                )
+                if recording_enabled and not any(e["track_id"] == track.track_id for e in self._unidentified_events):
                     self._unidentified_events.append(uap_record)
                     if len(self._unidentified_events) > 50:
                         self._unidentified_events.pop(0)

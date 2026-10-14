@@ -105,6 +105,9 @@ async function loadSystemConfig() {
     if (res.ok) {
       appConfig = await res.json();
       populateSettingsForm();
+      if (typeof window.syncModeUI === 'function') {
+        window.syncModeUI(appConfig.mode);
+      }
     }
   } catch (e) {
     showToast('Failed to load system configuration', 'error');
@@ -463,25 +466,44 @@ function initActionButtons() {
   });
 }
 
-// Mode Switcher (Feed vs Long-Exposure / Timelapse)
+// Mode Switcher (Feed vs Long-Exposure / Timelapse vs Test Preview)
 function initModeSwitcher() {
   const btnFeed = document.getElementById('btn-mode-feed');
   const btnTimelapse = document.getElementById('btn-mode-timelapse');
+  const btnTesting = document.getElementById('btn-mode-testing');
   const badge = document.getElementById('live-mode-badge');
 
   const setModeUI = (mode) => {
+    btnFeed?.classList.remove('active');
+    btnTimelapse?.classList.remove('active');
+    btnTesting?.classList.remove('active');
+
     if (mode === 'feed') {
       btnFeed?.classList.add('active');
-      btnTimelapse?.classList.remove('active');
-      if (badge) badge.textContent = 'FEED MODE (30 FPS)';
+      if (badge) {
+        badge.textContent = 'FEED MODE (30 FPS)';
+        badge.style.color = 'var(--text-main)';
+      }
+      skyViewer.pollInterval = 1000;
+    } else if (mode === 'live_testing') {
+      btnTesting?.classList.add('active');
+      if (badge) {
+        badge.textContent = 'TEST PREVIEW (RECORDING PAUSED)';
+        badge.style.color = 'var(--accent-warning)';
+      }
       skyViewer.pollInterval = 1000;
     } else {
       btnTimelapse?.classList.add('active');
-      btnFeed?.classList.remove('active');
-      if (badge) badge.textContent = 'TIMELAPSE / LONG-EXPOSURE MODE';
+      if (badge) {
+        badge.textContent = 'TIMELAPSE / LONG-EXPOSURE MODE';
+        badge.style.color = 'var(--text-main)';
+      }
       skyViewer.pollInterval = 5000;
     }
   };
+
+  window.syncModeUI = setModeUI;
+  if (appConfig) setModeUI(appConfig.mode);
 
   btnFeed?.addEventListener('click', async () => {
     try {
@@ -492,7 +514,7 @@ function initModeSwitcher() {
       });
       if (res.ok) {
         setModeUI('feed');
-        showToast('Switched to Feed Mode (High FPS, Optical Tracking)', 'info');
+        showToast('Switched to Feed Mode (Live Video & Tracking)', 'info');
       }
     } catch (e) {
       showToast('Failed to switch mode', 'error');
@@ -509,6 +531,22 @@ function initModeSwitcher() {
       if (res.ok) {
         setModeUI('long_exposure');
         showToast('Switched to Timelapse / Long-Exposure Mode', 'info');
+      }
+    } catch (e) {
+      showToast('Failed to switch mode', 'error');
+    }
+  });
+
+  btnTesting?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'live_testing' })
+      });
+      if (res.ok) {
+        setModeUI('live_testing');
+        showToast('Switched to Test Preview Mode: Live view active, recording PAUSED.', 'info');
       }
     } catch (e) {
       showToast('Failed to switch mode', 'error');
