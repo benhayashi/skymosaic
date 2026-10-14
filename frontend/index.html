@@ -469,18 +469,95 @@
         <div class="card settings-card">
           <h2>Pipeline & Automation</h2>
           <div class="form-row">
-            <div class="form-group col-4">
-              <label for="set-capture-interval">Snapshot Interval (seconds)</label>
+            <div class="form-group col-3">
+              <label for="set-capture-interval">Snapshot Interval (s)</label>
               <input type="number" id="set-capture-interval" class="form-control" value="10">
             </div>
-            <div class="form-group col-4">
+            <div class="form-group col-3">
+              <label for="set-snapshot-res">Snapshot Resolution</label>
+              <select id="set-snapshot-res" class="form-control">
+                <option value="original">Original (Full Stitch Resolution)</option>
+                <option value="1920x1080">1080p (1920 x 1080)</option>
+                <option value="1280x720">720p HD (1280 x 720 - Space Saver)</option>
+                <option value="800x800">800 x 800 (Compact Dome)</option>
+              </select>
+            </div>
+            <div class="form-group col-3">
+              <label for="set-snapshot-quality">JPEG Quality (1-100)</label>
+              <input type="number" id="set-snapshot-quality" min="10" max="100" class="form-control" value="85">
+            </div>
+            <div class="form-group col-3">
+              <label for="set-timelapse-res">Timelapse Resolution</label>
+              <select id="set-timelapse-res" class="form-control">
+                <option value="original">Original</option>
+                <option value="1920x1080">1920 x 1080 (1080p)</option>
+                <option value="1280x720">1280 x 720 (720p)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group col-6">
               <label for="set-timelapse-fps">Timelapse FPS</label>
               <input type="number" id="set-timelapse-fps" class="form-control" value="25">
             </div>
-            <div class="form-group col-4">
-              <label for="set-startrails-thresh">Startrail Sensitivity</label>
+            <div class="form-group col-6">
+              <label for="set-startrails-thresh">Startrail Sensitivity Threshold</label>
               <input type="number" id="set-startrails-thresh" step="0.01" class="form-control" value="0.05">
             </div>
+          </div>
+        </div>
+
+        <div class="card settings-card">
+          <div class="section-title-row">
+            <h2>Remote Network Share, SMB & Data Retention</h2>
+            <div id="storage-status-badge" class="badge-pill" style="background:var(--bg-surface-elevated);border:1px solid var(--border-color);">Checking...</div>
+          </div>
+          <div class="form-row">
+            <div class="form-group col-8">
+              <label for="set-storage-remote-path">Remote Share / SMB / NFS / Backup Directory</label>
+              <input type="text" id="set-storage-remote-path" class="form-control" placeholder="/mnt/nas/skymosaic or //192.168.1.50/allsky_backup or D:\SkyBackups">
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">
+                Supports mounted SMB/CIFS/NFS paths, external drives, or secondary local backup directories.
+              </small>
+            </div>
+            <div class="form-group col-4" style="display:flex;align-items:flex-end;">
+              <button type="button" id="btn-test-remote-storage" class="btn btn-secondary" style="width:100%;">Test Remote Connection</button>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-4">
+              <label for="set-storage-retention">Data Retention (Days)</label>
+              <input type="number" id="set-storage-retention" min="0" max="3650" class="form-control" value="30">
+              <small style="color:var(--text-dim);font-size:0.75rem;">Local files older than this will be pruned (0 = keep indefinitely).</small>
+            </div>
+            <div class="form-group col-4">
+              <label for="set-storage-sync-interval">Sync Interval (Minutes)</label>
+              <input type="number" id="set-storage-sync-interval" min="5" max="1440" class="form-control" value="60">
+              <small style="color:var(--text-dim);font-size:0.75rem;">How frequently to automatically mirror files to remote.</small>
+            </div>
+            <div class="form-group col-4">
+              <label>Auto-Sync Enable</label>
+              <div style="display:flex;align-items:center;height:38px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="set-storage-enabled"> Enable Auto-Sync to Remote Share
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-top:10px;">
+            <div class="form-group col-12">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--accent-warning);">
+                <input type="checkbox" id="set-storage-delete-local"> Free Local Disk Space: Delete local files after successful verified transfer to remote share
+              </label>
+            </div>
+          </div>
+
+          <div style="margin-top:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <button type="button" id="btn-manual-sync-now" class="btn btn-secondary">Sync to Remote Now</button>
+            <button type="button" id="btn-manual-prune-now" class="btn btn-outline">Enforce Retention Prune Now</button>
+            <span id="storage-action-status" style="font-size:0.85rem;color:var(--text-dim);"></span>
           </div>
         </div>
 

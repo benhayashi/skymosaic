@@ -107,10 +107,25 @@ class AIPluginsConfig(BaseModel):
     meteor_detector_enabled: bool = Field(default=True, description="Enable fast transient meteor and fireball streak detector")
 
 
+class StorageConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Enable automatic remote share syncing and retention enforcement")
+    remote_path: str = Field(default="", description="Path to remote network share, mounted SMB directory, or local backup directory")
+    sync_interval_minutes: int = Field(default=60, description="Backup sync interval in minutes")
+    retention_days: int = Field(default=30, description="Local snapshot and media retention in days (0 = keep indefinitely)")
+    delete_local_after_sync: bool = Field(default=False, description="Delete local copies once verified copied to remote share")
+    backup_snapshots: bool = Field(default=True, description="Sync nightly snapshots to remote storage")
+    backup_timelapses: bool = Field(default=True, description="Sync timelapses to remote storage")
+    backup_keograms: bool = Field(default=True, description="Sync keograms to remote storage")
+    backup_startrails: bool = Field(default=True, description="Sync startrail images to remote storage")
+
+
 class PipelineConfig(BaseModel):
     capture_interval_sec: float = Field(default=10.0, description="Interval between snapshot captures in long-exposure mode")
     long_exposure_duration_sec: float = Field(default=15.0, description="Exposure duration in seconds for celestial events")
+    snapshot_resolution: str = Field(default="original", description="'original', '1920x1080', '1280x720', or '800x600'")
+    snapshot_jpeg_quality: int = Field(default=85, description="JPEG quality (1-100) for saved snapshots")
     timelapse_fps: int = Field(default=25, description="Frames per second for generated timelapse videos")
+    timelapse_resolution: str = Field(default="original", description="'original', '1920x1080', '1280x720', or '800x600'")
     keogram_slice_axis: str = Field(default="vertical", description="'vertical' column or 'radial' circular slice")
     startrails_threshold: float = Field(default=0.05, description="Luminance threshold to accumulate stars")
 
@@ -121,6 +136,7 @@ class SkyViewConfig(BaseModel):
     cameras: List[CameraConfig] = Field(default_factory=list)
     stitching: StitchingConfig = Field(default_factory=StitchingConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
     adsb: ADSBConfig = Field(default_factory=ADSBConfig)
     satellites: SatelliteConfig = Field(default_factory=SatelliteConfig)
     tracking: TrackingConfig = Field(default_factory=TrackingConfig)

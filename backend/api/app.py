@@ -30,6 +30,7 @@ from backend.config import (
 from backend.ingestion.stream_manager import StreamManager
 from backend.config import OperatingMode
 from backend.pipeline.media_generator import MediaGenerator
+from backend.pipeline.storage_manager import StorageManager
 from backend.stitching.stitcher import MultiCameraStitcher
 from backend.tracking.optical_tracker import OpticalTrackerEngine
 
@@ -40,6 +41,8 @@ app_config: SkyViewConfig = load_config(CONFIG_PATH)
 stream_manager = StreamManager(app_config)
 stitcher = MultiCameraStitcher(app_config)
 tracker_engine = OpticalTrackerEngine(app_config)
+storage_manager = StorageManager(app_config)
+storage_manager.start()
 
 app = FastAPI(title="SkyMosaic: Multi-Camera AllSky System", version="1.0.0")
 
@@ -96,6 +99,7 @@ def update_config(new_config: SkyViewConfig):
     stream_manager.update_config(app_config)
     stitcher.update_config(app_config)
     tracker_engine.update_config(app_config)
+    storage_manager.update_config(app_config)
     return {"status": "ok", "message": "Configuration updated successfully."}
 
 
@@ -347,13 +351,23 @@ def capture_stitched_snapshot():
     frames = stream_manager.get_all_active_frames()
     composite = stitcher.stitch_frames(frames, overlay_annotations=True)
 
+    # Apply resolution scaling if configured
+    res_str = app_config.pipeline.snapshot_resolution
+    if res_str and res_str != "original" and "x" in res_str:
+        try:
+            target_w, target_h = [int(v) for v in res_str.split("x")]
+            composite = cv2.resize(composite, (target_w, target_h), interpolation=cv2.INTER_AREA)
+        except Exception as e:
+            print(f"Error resizing snapshot: {e}")
+
     archive_dir = Path(app_config.data_dir) / "archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
     timestamp_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"skyview_{timestamp_str}.jpg"
+    filename = f"skymosaic_{timestamp_str}.jpg"
     full_path = archive_dir / filename
 
-    cv2.imwrite(str(full_path), composite)
+    quality = max(1, min(100, app_config.pipeline.snapshot_jpeg_quality))
+    cv2.imwrite(str(full_path), composite, [cv2.IMWRITE_JPEG_QUALITY, quality])
     return {"status": "ok", "filename": filename, "path": str(full_path)}
 
 
@@ -424,10 +438,47 @@ def trigger_generate_timelapse(req: GenerateMediaRequest):
         raise HTTPException(status_code=400, detail="At least 2 archived snapshots required to generate a timelapse.")
 
     out_file = Path(app_config.data_dir) / "timelapses" / f"timelapse_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
-    res = MediaGenerator.generate_timelapse([str(f) for f in files], str(out_file), fps=req.fps)
+    target_size = None
+    res_str = app_config.pipeline.timelapse_resolution
+    if res_str and res_str != "original" and "x" in res_str:
+        try:
+            target_size = tuple(int(v) for v in res_str.split("x"))
+        except Exception:
+            pass
+
+    res = MediaGenerator.generate_timelapse([str(f) for f in files], str(out_file), fps=req.fps, target_size=target_size)
     if not res:
         raise HTTPException(status_code=500, detail="Failed to build Timelapse.")
     return {"status": "ok", "output_path": res, "filename": out_file.name}
+
+
+# Storage & Remote Backup Endpoints
+
+class TestRemotePathRequest(BaseModel):
+    remote_path: str
+
+
+@app.get("/api/storage/status")
+def get_storage_status():
+    return storage_manager.get_status()
+
+
+@app.post("/api/storage/test")
+def test_remote_storage(req: TestRemotePathRequest):
+    res = storage_manager.test_remote_connection(req.remote_path)
+    return res
+
+
+@app.post("/api/storage/sync")
+def trigger_storage_sync():
+    res = storage_manager.run_sync()
+    return res
+
+
+@app.post("/api/storage/prune")
+def trigger_storage_prune():
+    count = storage_manager.prune_old_files()
+    return {"status": "ok", "pruned_files": count}
 
 
 # Mount data directory for direct asset serving

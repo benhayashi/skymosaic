@@ -705,11 +705,110 @@ function populateSettingsForm() {
   document.getElementById('set-horizon-clip').value = appConfig.stitching.horizon_mask_radius;
 
   document.getElementById('set-capture-interval').value = appConfig.pipeline.capture_interval_sec;
+  document.getElementById('set-snapshot-res').value = appConfig.pipeline.snapshot_resolution || 'original';
+  document.getElementById('set-snapshot-quality').value = appConfig.pipeline.snapshot_jpeg_quality || 85;
+  document.getElementById('set-timelapse-res').value = appConfig.pipeline.timelapse_resolution || 'original';
   document.getElementById('set-timelapse-fps').value = appConfig.pipeline.timelapse_fps;
   document.getElementById('set-startrails-thresh').value = appConfig.pipeline.startrails_threshold;
+
+  if (appConfig.storage) {
+    document.getElementById('set-storage-remote-path').value = appConfig.storage.remote_path || '';
+    document.getElementById('set-storage-retention').value = appConfig.storage.retention_days ?? 30;
+    document.getElementById('set-storage-sync-interval').value = appConfig.storage.sync_interval_minutes ?? 60;
+    document.getElementById('set-storage-enabled').checked = !!appConfig.storage.enabled;
+    document.getElementById('set-storage-delete-local').checked = !!appConfig.storage.delete_local_after_sync;
+  }
+
+  fetchStorageStatus();
+}
+
+async function fetchStorageStatus() {
+  const badge = document.getElementById('storage-status-badge');
+  if (!badge) return;
+  try {
+    const res = await fetch('/api/storage/status');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.remote_accessible) {
+        badge.textContent = `Online: ${data.remote_info?.free_gb || '?'} GB free`;
+        badge.style.color = 'var(--accent-success)';
+        badge.style.borderColor = 'var(--accent-success)';
+      } else if (appConfig?.storage?.remote_path) {
+        badge.textContent = 'Remote Share Unreachable';
+        badge.style.color = 'var(--accent-danger)';
+        badge.style.borderColor = 'var(--accent-danger)';
+      } else {
+        badge.textContent = 'Remote Backup Disabled';
+        badge.style.color = 'var(--text-dim)';
+        badge.style.borderColor = 'var(--border-color)';
+      }
+    }
+  } catch (_) {}
 }
 
 function initSettingsEvents() {
+  document.getElementById('btn-test-remote-storage')?.addEventListener('click', async () => {
+    const remotePath = document.getElementById('set-storage-remote-path').value.trim();
+    if (!remotePath) {
+      showToast('Please enter a remote share directory path first', 'error');
+      return;
+    }
+    const statusEl = document.getElementById('storage-action-status');
+    if (statusEl) statusEl.textContent = 'Testing connection...';
+
+    try {
+      const res = await fetch('/api/storage/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remote_path: remotePath })
+      });
+      const data = await res.json();
+      if (data.accessible && data.writable) {
+        showToast(`Remote path accessible! Free space: ${data.free_gb} GB`, 'success');
+        if (statusEl) statusEl.textContent = `Accessible (${data.free_gb} GB free)`;
+      } else {
+        showToast(`Remote error: ${data.error || 'Path inaccessible'}`, 'error');
+        if (statusEl) statusEl.textContent = `Inaccessible: ${data.error}`;
+      }
+      fetchStorageStatus();
+    } catch (e) {
+      showToast('Network error testing storage', 'error');
+    }
+  });
+
+  document.getElementById('btn-manual-sync-now')?.addEventListener('click', async () => {
+    const statusEl = document.getElementById('storage-action-status');
+    if (statusEl) statusEl.textContent = 'Syncing files to remote storage...';
+    try {
+      const res = await fetch('/api/storage/sync', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'success') {
+        showToast(data.message, 'success');
+        if (statusEl) statusEl.textContent = `Synced: ${data.copied_files} copied.`;
+      } else {
+        showToast(data.message || 'Sync failed', 'error');
+        if (statusEl) statusEl.textContent = `Sync error: ${data.message}`;
+      }
+      fetchStorageStatus();
+    } catch (e) {
+      showToast('Error triggering sync', 'error');
+    }
+  });
+
+  document.getElementById('btn-manual-prune-now')?.addEventListener('click', async () => {
+    const statusEl = document.getElementById('storage-action-status');
+    if (statusEl) statusEl.textContent = 'Pruning expired files...';
+    try {
+      const res = await fetch('/api/storage/prune', { method: 'POST' });
+      const data = await res.json();
+      showToast(`Retention enforced. Pruned ${data.pruned_files} files older than retention policy.`, 'info');
+      if (statusEl) statusEl.textContent = `Pruned ${data.pruned_files} files.`;
+      await loadGallery();
+    } catch (e) {
+      showToast('Error pruning files', 'error');
+    }
+  });
+
   document.getElementById('btn-save-all-settings')?.addEventListener('click', async () => {
     if (!appConfig) return;
 
@@ -724,8 +823,18 @@ function initSettingsEvents() {
     appConfig.stitching.horizon_mask_radius = parseFloat(document.getElementById('set-horizon-clip').value);
 
     appConfig.pipeline.capture_interval_sec = parseFloat(document.getElementById('set-capture-interval').value);
+    appConfig.pipeline.snapshot_resolution = document.getElementById('set-snapshot-res').value;
+    appConfig.pipeline.snapshot_jpeg_quality = parseInt(document.getElementById('set-snapshot-quality').value);
+    appConfig.pipeline.timelapse_resolution = document.getElementById('set-timelapse-res').value;
     appConfig.pipeline.timelapse_fps = parseInt(document.getElementById('set-timelapse-fps').value);
     appConfig.pipeline.startrails_threshold = parseFloat(document.getElementById('set-startrails-thresh').value);
+
+    if (!appConfig.storage) appConfig.storage = {};
+    appConfig.storage.remote_path = document.getElementById('set-storage-remote-path').value.trim();
+    appConfig.storage.retention_days = parseInt(document.getElementById('set-storage-retention').value) || 0;
+    appConfig.storage.sync_interval_minutes = parseInt(document.getElementById('set-storage-sync-interval').value) || 60;
+    appConfig.storage.enabled = document.getElementById('set-storage-enabled').checked;
+    appConfig.storage.delete_local_after_sync = document.getElementById('set-storage-delete-local').checked;
 
     try {
       const res = await fetch('/api/config', {
@@ -737,6 +846,7 @@ function initSettingsEvents() {
         showToast('Settings saved successfully', 'success');
         skyViewer.render();
         updateTelemetry();
+        fetchStorageStatus();
       }
     } catch (e) {
       showToast('Failed to save settings', 'error');
