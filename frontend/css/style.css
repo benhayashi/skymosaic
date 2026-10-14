@@ -957,3 +957,254 @@ input[type="range"] {
   color: var(--text-muted);
 }
 
+/* UNIT TOGGLE PILLS */
+.unit-toggle-pills {
+  display: flex;
+  background-color: var(--bg-main);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  gap: 2px;
+}
+
+.unit-pill-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  touch-action: manipulation;
+}
+
+.unit-pill-btn:hover {
+  color: var(--text-main);
+}
+
+.unit-pill-btn.active {
+  background-color: var(--accent-primary);
+  color: #fff;
+  box-shadow: 0 0 6px rgba(99, 102, 241, 0.4);
+}
+
+/* LOCATION ACTION BAR */
+.location-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.location-status-text {
+  font-size: 0.8rem;
+  color: var(--accent-secondary);
+  font-family: var(--font-mono);
+}
+
+/* =========================================================================
+   RESPONSIVE DESIGN & MOBILE DEVICE WEB BROWSER OPTIMIZATIONS
+   ========================================================================= */
+
+@media (max-width: 1080px) {
+  .skyview-container {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  
+  .studio-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  
+  .studio-controls-panel {
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Mobile Header */
+  .app-header {
+    height: auto;
+    min-height: 56px;
+    padding: 8px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+  }
+
+  .brand {
+    gap: 8px;
+  }
+
+  .brand-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .brand-title {
+    font-size: 1.1rem;
+  }
+
+  .brand-subtitle {
+    display: none; /* Conserve vertical height on mobile browsers */
+  }
+
+  /* Scrollable Nav Tabs Strip for Mobile */
+  .nav-tabs {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+    padding: 3px;
+    gap: 4px;
+    scrollbar-width: none;
+  }
+  .nav-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab-btn {
+    padding: 7px 12px;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+    min-height: 38px;
+    touch-action: manipulation;
+  }
+
+  /* Mode Switcher */
+  .mode-selector {
+    order: 4;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .mode-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 6px 8px;
+    font-size: 0.75rem;
+    min-height: 36px;
+  }
+
+  .header-actions {
+    order: 2;
+    margin-left: auto;
+    gap: 8px;
+  }
+
+  .header-actions .action-label {
+    display: none; /* Icon-only compact actions on phone */
+  }
+
+  .header-actions .btn {
+    padding: 6px 10px;
+    min-height: 36px;
+  }
+
+  /* Main viewport padding */
+  .app-main {
+    padding: 10px;
+  }
+
+  /* Weather Banner */
+  .weather-banner {
+    grid-template-columns: repeat(2, 1fr);
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .weather-item:last-child {
+    grid-column: span 2;
+  }
+
+  .weather-val {
+    font-size: 0.85rem;
+  }
+
+  /* Sky Dome Canvas Container */
+  .canvas-wrapper {
+    min-height: 320px;
+    padding: 8px;
+  }
+
+  #sky-canvas {
+    max-height: 55vh;
+  }
+
+  .viewport-toolbar {
+    height: auto;
+    padding: 8px 10px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .viewport-toolbar .toolbar-group:last-child {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .telemetry-bar {
+    height: auto;
+    padding: 8px 12px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .telemetry-item {
+    flex: 1 1 40%;
+  }
+
+  /* Forms & Cards on Mobile */
+  .form-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .col-4, .col-6, .col-8, .col-12 {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  .location-action-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .location-action-bar .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Gallery Grid */
+  .gallery-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cameras-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Dialogs */
+  .app-dialog {
+    width: 95vw;
+    max-height: 90vh;
+    padding: 16px;
+    overflow-y: auto;
+  }
+}
+
+

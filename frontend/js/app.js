@@ -4,13 +4,16 @@ let appConfig = null;
 let camerasList = [];
 let skyViewer = null;
 let calibrationStudio = null;
+let currentUnitSystem = localStorage.getItem('skyview_unit_system') || 'metric'; // 'metric' or 'us'
 
 document.addEventListener('DOMContentLoaded', async () => {
   initNightMode();
   initTabs();
+  initUnitSystem();
 
   skyViewer = new SkyViewer('sky-canvas');
   calibrationStudio = new CalibrationStudio('calib-canvas');
+  skyViewer.setUnitSystem(currentUnitSystem);
 
   await loadSystemConfig();
   await loadCameras();
@@ -20,6 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSettingsEvents();
   initModalEvents();
   initModeSwitcher();
+  initGeolocationControls();
   startTrackingPoller();
 
   // Start live sky view
@@ -27,6 +31,94 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateTelemetry();
   setInterval(updateTelemetry, 5000);
 });
+
+// Unit system initialization and formatting helpers
+function initUnitSystem() {
+  const btnMetric = document.getElementById('btn-unit-metric');
+  const btnUs = document.getElementById('btn-unit-us');
+  const selectUnit = document.getElementById('set-unit-system');
+
+  const setUnit = (unit, syncSelect = true) => {
+    currentUnitSystem = unit;
+    localStorage.setItem('skyview_unit_system', unit);
+
+    if (btnMetric && btnUs) {
+      if (unit === 'metric') {
+        btnMetric.classList.add('active');
+        btnUs.classList.remove('active');
+      } else {
+        btnUs.classList.add('active');
+        btnMetric.classList.remove('active');
+      }
+    }
+
+    if (syncSelect && selectUnit) {
+      selectUnit.value = unit;
+    }
+
+    const elevLabel = document.getElementById('label-elevation-unit');
+    if (elevLabel) elevLabel.textContent = unit === 'metric' ? 'meters' : 'feet';
+
+    if (skyViewer) {
+      skyViewer.setUnitSystem(unit);
+    }
+    updateTelemetry();
+    if (window.lastTargets) {
+      updateTargetsList(window.lastTargets);
+    }
+  };
+
+  btnMetric?.addEventListener('click', () => {
+    setUnit('metric');
+    showToast('Display units set to Metric (km, m, km/h)', 'info');
+  });
+
+  btnUs?.addEventListener('click', () => {
+    setUnit('us');
+    showToast('Display units set to US Customary (mi, ft, mph / kts)', 'info');
+  });
+
+  selectUnit?.addEventListener('change', (e) => {
+    setUnit(e.target.value, false);
+  });
+
+  setUnit(currentUnitSystem);
+}
+
+// Distance / altitude formatting helper
+function formatElevation(meters) {
+  if (currentUnitSystem === 'us') {
+    const feet = Math.round(meters * 3.28084);
+    return `${feet} ft`;
+  }
+  return `${Math.round(meters)} m`;
+}
+
+function formatAltitude(altMeters, altFt) {
+  if (currentUnitSystem === 'us') {
+    const ft = altFt != null ? altFt : Math.round(altMeters * 3.28084);
+    return `${ft.toLocaleString()} ft`;
+  }
+  const m = altMeters != null ? altMeters : Math.round(altFt * 0.3048);
+  return `${m.toLocaleString()} m`;
+}
+
+function formatSpeed(speedKts) {
+  if (currentUnitSystem === 'us') {
+    const mph = Math.round(speedKts * 1.15078);
+    return `${speedKts} kts (${mph} mph)`;
+  }
+  const kmh = Math.round(speedKts * 1.852);
+  return `${kmh} km/h (${speedKts} kts)`;
+}
+
+function formatRange(rangeKm) {
+  if (currentUnitSystem === 'us') {
+    const miles = (rangeKm * 0.621371).toFixed(1);
+    return `${miles} mi`;
+  }
+  return `${rangeKm.toFixed(1)} km`;
+}
 
 
 // Toast notification helper
@@ -584,6 +676,7 @@ function startTrackingPoller() {
 }
 
 function updateTargetsList(targets) {
+  window.lastTargets = targets;
   const container = document.getElementById('sidebar-targets-list');
   const countBadge = document.getElementById('badge-target-count');
   const weathTargets = document.getElementById('weath-targets');
@@ -609,8 +702,18 @@ function updateTargetsList(targets) {
     else if (t.category === 'vision_ai') icon = '👁';
 
     let extraInfo = `${t.altitude_deg.toFixed(1)}° Alt, ${t.azimuth_deg.toFixed(1)}° Az`;
-    if (t.speed_kts) extraInfo += ` | ${t.speed_kts} kts`;
-    if (t.speed_deg_s > 0) extraInfo += ` | ${t.speed_deg_s}°/s`;
+    if (t.telemetry && t.telemetry.altitude_ft != null) {
+      extraInfo += ` | ${formatAltitude(null, t.telemetry.altitude_ft)}`;
+    }
+    if (t.speed_kts) {
+      extraInfo += ` | ${formatSpeed(t.speed_kts)}`;
+    }
+    if (t.telemetry && t.telemetry.range_km != null) {
+      extraInfo += ` | Dist: ${formatRange(t.telemetry.range_km)}`;
+    }
+    if (t.speed_deg_s > 0) {
+      extraInfo += ` | ${t.speed_deg_s}°/s`;
+    }
 
     row.innerHTML = `
       <div>
@@ -734,8 +837,13 @@ function populateSettingsForm() {
   if (!appConfig) return;
   document.getElementById('set-lat').value = appConfig.observer.latitude;
   document.getElementById('set-lon').value = appConfig.observer.longitude;
-  document.getElementById('set-elevation').value = appConfig.observer.elevation_m;
+  const elevInput = document.getElementById('set-elevation');
+  if (elevInput) {
+    elevInput.value = currentUnitSystem === 'us' ? Math.round(appConfig.observer.elevation_m * 3.28084) : Math.round(appConfig.observer.elevation_m);
+  }
   document.getElementById('set-tz').value = appConfig.observer.timezone_str;
+  const unitSelect = document.getElementById('set-unit-system');
+  if (unitSelect) unitSelect.value = currentUnitSystem;
 
   document.getElementById('set-projection').value = appConfig.stitching.projection;
   document.getElementById('set-canvas-size').value = appConfig.stitching.canvas_size;
@@ -892,7 +1000,8 @@ function initSettingsEvents() {
 
     appConfig.observer.latitude = parseFloat(document.getElementById('set-lat').value);
     appConfig.observer.longitude = parseFloat(document.getElementById('set-lon').value);
-    appConfig.observer.elevation_m = parseFloat(document.getElementById('set-elevation').value);
+    const elevVal = parseFloat(document.getElementById('set-elevation').value);
+    appConfig.observer.elevation_m = currentUnitSystem === 'us' ? elevVal / 3.28084 : elevVal;
     appConfig.observer.timezone_str = document.getElementById('set-tz').value;
 
     appConfig.stitching.projection = document.getElementById('set-projection').value;
@@ -1054,13 +1163,134 @@ function initModalEvents() {
   });
 }
 
+// Geolocation Acquisition (Device GPS & Network IP)
+function initGeolocationControls() {
+  const btnGps = document.getElementById('btn-detect-gps');
+  const btnNet = document.getElementById('btn-detect-network');
+  const statusText = document.getElementById('location-status-text');
+  const sourceBadge = document.getElementById('location-source-badge');
+
+  const applyCoordinates = (lat, lon, elevationM = null, tz = null, source = 'Device GPS', accuracyM = null) => {
+    document.getElementById('set-lat').value = lat.toFixed(4);
+    document.getElementById('set-lon').value = lon.toFixed(4);
+
+    if (elevationM != null && !isNaN(elevationM)) {
+      if (currentUnitSystem === 'us') {
+        document.getElementById('set-elevation').value = Math.round(elevationM * 3.28084);
+      } else {
+        document.getElementById('set-elevation').value = Math.round(elevationM);
+      }
+    }
+
+    if (tz) {
+      document.getElementById('set-tz').value = tz;
+    } else {
+      try {
+        const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (detectedTz) document.getElementById('set-tz').value = detectedTz;
+      } catch (_) {}
+    }
+
+    if (sourceBadge) {
+      sourceBadge.textContent = source;
+      sourceBadge.style.color = 'var(--accent-success)';
+      sourceBadge.style.borderColor = 'var(--accent-success)';
+    }
+
+    let msg = `Acquired ${lat.toFixed(4)}°, ${lon.toFixed(4)}° via ${source}`;
+    if (accuracyM != null) {
+      msg += ` (±${Math.round(accuracyM)}m)`;
+    }
+    if (statusText) statusText.textContent = msg;
+    showToast(msg, 'success');
+  };
+
+  btnGps?.addEventListener('click', () => {
+    if (!('geolocation' in navigator)) {
+      showToast('Geolocation is not supported by your browser.', 'error');
+      return;
+    }
+
+    if (statusText) statusText.textContent = 'Acquiring high-accuracy device location...';
+    btnGps.disabled = true;
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        btnGps.disabled = false;
+        const coords = position.coords;
+        let elev = coords.altitude;
+        applyCoordinates(coords.latitude, coords.longitude, elev, null, 'Device GPS', coords.accuracy);
+      },
+      (error) => {
+        btnGps.disabled = false;
+        let errDesc = 'Location access denied or unavailable.';
+        if (error.code === error.PERMISSION_DENIED) {
+          errDesc = 'Location permission denied. Check browser or OS settings, or use Network detection.';
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          errDesc = 'Position unavailable. Trying network IP detection fallback...';
+          // Automatic network fallback
+          detectNetworkLocation();
+          return;
+        } else if (error.code === error.TIMEOUT) {
+          errDesc = 'Location request timed out. Trying network IP detection...';
+          detectNetworkLocation();
+          return;
+        }
+        if (statusText) statusText.textContent = errDesc;
+        showToast(errDesc, 'error');
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
+    );
+  });
+
+  const detectNetworkLocation = async () => {
+    if (statusText) statusText.textContent = 'Querying network IP geolocation...';
+    if (btnNet) btnNet.disabled = true;
+
+    try {
+      // Try reliable public IP geolocation services
+      let res = await fetch('https://ipapi.co/json/').catch(() => null);
+      if (!res || !res.ok) {
+        res = await fetch('https://ipwho.is/').catch(() => null);
+      }
+
+      if (res && res.ok) {
+        const data = await res.json();
+        const lat = parseFloat(data.latitude || data.lat);
+        const lon = parseFloat(data.longitude || data.lon);
+        const tz = data.timezone || (data.timezone ? data.timezone.id : null);
+        const city = data.city ? `${data.city}, ${data.country_code || data.country}` : 'Network IP';
+
+        if (!isNaN(lat) && !isNaN(lon)) {
+          applyCoordinates(lat, lon, null, tz, `Network IP (${city})`, null);
+          return;
+        }
+      }
+      throw new Error('Could not resolve location from network IP.');
+    } catch (e) {
+      const msg = e.message || 'Network location detection failed.';
+      if (statusText) statusText.textContent = msg;
+      showToast(msg, 'error');
+    } finally {
+      if (btnNet) btnNet.disabled = false;
+    }
+  };
+
+  btnNet?.addEventListener('click', detectNetworkLocation);
+}
+
 // Telemetry updater
 function updateTelemetry() {
   if (!appConfig) return;
   const obs = appConfig.observer;
   const latStr = `${Math.abs(obs.latitude).toFixed(2)}° ${obs.latitude >= 0 ? 'N' : 'S'}`;
   const lonStr = `${Math.abs(obs.longitude).toFixed(2)}° ${obs.longitude >= 0 ? 'E' : 'W'}`;
-  document.getElementById('tel-observer').textContent = `${latStr}, ${lonStr}`;
+  const elevFormatted = formatElevation(obs.elevation_m);
+  document.getElementById('tel-observer').textContent = `${latStr}, ${lonStr} (${elevFormatted})`;
 
   // Approximate Local Sidereal Time
   const now = new Date();
@@ -1079,3 +1309,4 @@ function updateTelemetry() {
   document.getElementById('tel-proj').textContent =
     appConfig.stitching.projection === 'zenithal_polar' ? 'Zenithal Polar Dome' : 'Equirectangular Panorama';
 }
+

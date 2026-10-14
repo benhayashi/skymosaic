@@ -9,6 +9,7 @@ class SkyViewer {
     this.showAnnotations = true;
     this.showConstellations = false;
     this.showTracking = true;
+    this.unitSystem = 'metric'; // 'metric' or 'us'
     this.stars = [];
     this.constellations = [];
     this.targets = [];
@@ -17,6 +18,11 @@ class SkyViewer {
       this.render();
       document.getElementById('sky-loader')?.classList.add('hidden');
     };
+  }
+
+  setUnitSystem(unit) {
+    this.unitSystem = unit;
+    this.render();
   }
 
   start() {
@@ -104,8 +110,17 @@ class SkyViewer {
         this.ctx.beginPath();
         this.ctx.arc(px, py, 3, 0, 2 * Math.PI);
         this.ctx.fill();
-        // Label badge
-        this.ctx.fillText(`✈ ${target.label}`, px + 14, py + 3);
+        // Label badge with unit awareness
+        let displayLabel = target.label;
+        if (target.telemetry && target.telemetry.altitude_ft != null) {
+          if (this.unitSystem === 'metric') {
+            const altM = Math.round(target.telemetry.altitude_ft * 0.3048);
+            displayLabel = `${target.telemetry.flight || target.label} (${altM}m)`;
+          } else {
+            displayLabel = `${target.telemetry.flight || target.label} (FL${Math.round(target.telemetry.altitude_ft / 100)})`;
+          }
+        }
+        this.ctx.fillText(`✈ ${displayLabel}`, px + 14, py + 3);
       } else if (cat === 'satellite') {
         // Purple Diamond HUD
         this.ctx.beginPath();
