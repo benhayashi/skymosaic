@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from backend.astrometry.celestial import get_all_celestial_objects, get_sun_coordinates
-from backend.config import ObserverConfig, SkyViewConfig, TrackingConfig
+from backend.config import ObserverConfig, OperatingMode, SkyViewConfig, TrackingConfig
 from backend.plugins.object_detection_plugin import ObjectDetectionPlugin
 from backend.plugins.weather_plugin import WeatherClassifierPlugin
 from backend.tracking.adsb_tracker import ADSBTracker

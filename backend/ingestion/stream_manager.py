@@ -149,6 +149,8 @@ class CameraStreamHandler:
             url = self.camera_cfg.url_or_path
             if not url:
                 return False
+            # Prevent multithreaded ffmpeg pthread_frame race condition on high-framerate RTSP
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|threads;1|fflags;nobuffer|flags;low_delay"
             self._cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
             return self._cap.isOpened()
         elif self.camera_cfg.source_type == CameraSourceType.USB:
