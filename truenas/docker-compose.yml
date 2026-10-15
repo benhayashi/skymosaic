@@ -1,0 +1,25 @@
+# SkyMosaic for TrueNAS SCALE (24.10+ "Install via YAML" / Custom App) or any Docker host.
+# 1. Create a dataset, e.g. /mnt/<pool>/apps/skymosaic, and make it writable by UID 0 (default) .
+# 2. Replace the host path below, then paste this file into Apps -> Discover -> Install via YAML.
+# 3. Open http://<truenas-ip>:8080 . config.json is created in the dataset on first start.
+# Camera streams (RTSP) work as-is. For USB cameras uncomment `devices`.
+services:
+  skymosaic:
+    image: ghcr.io/benhayashi/skymosaic:latest
+    # Or build locally instead:  build: { context: https://github.com/benhayashi/skymosaic.git }
+    container_name: skymosaic
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=America/New_York
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - /mnt/POOL/apps/skymosaic/data:/app/data
+    # devices:
+    #   - /dev/video0:/dev/video0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/config"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -175,3 +175,14 @@ uv run pytest
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+## Docker / TrueNAS
+
+```bash
+docker compose up -d skymosaic     # builds and runs on http://localhost:8080
+```
+
+- Data (config, archive, TLE cache) lives in the `/app/data` volume; `config.json` is seeded automatically on first start.
+- **TrueNAS SCALE:** paste [`truenas/docker-compose.yml`](truenas/docker-compose.yml) into *Apps → Install via YAML*, set the host path to a dataset and your `TZ`. Images are published to `ghcr.io/benhayashi/skymosaic` by the `docker.yml` workflow on pushes to `main`.
+- Set `SKYMOSAIC_CONFIG` to use a different config file path.
+- A local readsb on the same host is reachable at `http://<host-ip>:8081` (not `localhost` from inside the container).

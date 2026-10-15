@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__
+*.pyc
+tests
+data/config.json
+data/archive
+data/keograms
+data/startrails
+data/timelapses
+data/test_shots
+data/masks
+data/tle

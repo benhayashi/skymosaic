@@ -37,6 +37,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - PORT=8080
+      - TZ=${TZ:-UTC}
 
   # ----------------------------------------------------------------------------
   # Local RTL-SDR ADS-B Receiver via SDR-Enthusiasts readsb-protobuf

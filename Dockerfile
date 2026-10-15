@@ -26,26 +26,28 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 COPY pyproject.toml .
 
 # Install dependencies using uv
-RUN uv pip install --system --no-cache -r <(uv pip compile pyproject.toml)
+RUN uv pip install --system --no-cache -r pyproject.toml
 
 # Copy application source code
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 COPY main.py .
 
-# Create persistent storage directories
-RUN mkdir -p data/archive data/keograms data/startrails data/timelapses data/test_shots data/masks
-
-# Default configuration template if not mounted
-COPY data/config.example.json ./data/config.example.json
-RUN cp ./data/config.example.json ./data/config.json
+# Persistent storage (mount a volume / host path at /app/data). The entrypoint seeds config.json
+# from the bundled example on first start so empty mounts (e.g. TrueNAS datasets) just work.
+COPY data/config.example.json /opt/skymosaic/config.example.json
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && mkdir -p data/archive data/keograms data/startrails data/timelapses data/test_shots data/masks data/tle
+VOLUME ["/app/data"]
 
 # Expose web dashboard & API port
 EXPOSE 8080
 
 # Healthcheck endpoint
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/api/sky/live.jpg > /dev/null || exit 1
+    CMD curl -f http://localhost:8080/api/config > /dev/null || exit 1
 
 # Launch SkyMosaic
-ENTRYPOINT ["python", "main.py", "--host", "0.0.0.0", "--port", "8080"]
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["python", "main.py", "--host", "0.0.0.0", "--port", "8080"]
