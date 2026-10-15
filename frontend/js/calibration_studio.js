@@ -23,7 +23,9 @@ class CalibrationStudio {
     // Matching tool & UI states
     this.starMatches = []; // [{pixel_x, pixel_y, star_id}]
     this.isDrawingMask = false;
-    this.maskPoints = [];
+    this.drawingObstaclePoints = [];
+    this.obstacles = []; // [{id, label, points: [[x,y],...]}]
+    this.maskTrackingOnly = true;
 
     // Toggles
     this.showStars = true;
@@ -55,10 +57,36 @@ class CalibrationStudio {
     this.fov = camera.intrinsics.fov_deg;
     this.lensModel = camera.intrinsics.lens_model;
     this.k1 = camera.intrinsics.k1 || 0.0;
-    this.polygonMask = camera.polygon_mask ? [...camera.polygon_mask] : [];
-    this.maskPoints = [...this.polygonMask];
+    this.maskTrackingOnly = camera.mask_tracking_only !== undefined ? camera.mask_tracking_only : true;
+
+    // Load multi-obstacle polygons
+    this.obstacles = [];
+    if (camera.polygon_masks && camera.polygon_masks.length > 0) {
+      camera.polygon_masks.forEach((poly, idx) => {
+        if (poly && poly.length >= 3) {
+          this.obstacles.push({
+            id: `obs_${idx + 1}`,
+            label: `Obstacle #${idx + 1}`,
+            points: [...poly]
+          });
+        }
+      });
+    } else if (camera.polygon_mask && camera.polygon_mask.length >= 3) {
+      this.obstacles.push({
+        id: 'obs_1',
+        label: 'Obstacle #1',
+        points: [...camera.polygon_mask]
+      });
+    }
+
+    this.isDrawingMask = false;
+    this.drawingObstaclePoints = [];
+
+    const chk = document.getElementById('calib-mask-tracking-only');
+    if (chk) chk.checked = this.maskTrackingOnly;
 
     this.updateControlsUI();
+    this.renderObstacleList();
     this.loadCameraTestFrame(camera.id);
   }
 
@@ -310,30 +338,69 @@ class CalibrationStudio {
       this.renderHorizonLine(w, h);
     }
 
-    // 7. Draw polygon obstacle mask
-    if (this.showMask && this.maskPoints.length > 0) {
-      this.ctx.fillStyle = 'rgba(239, 68, 68, 0.28)';
-      this.ctx.strokeStyle = '#ef4444';
-      this.ctx.lineWidth = 2;
-      this.ctx.beginPath();
+    // 7. Draw all configured obstacle polygons
+    if (this.showMask) {
+      const colors = ['#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6', '#ec4899'];
+      this.obstacles.forEach((obs, idx) => {
+        if (!obs.points || obs.points.length < 3) return;
+        const color = colors[idx % colors.length];
 
-      for (let i = 0; i < this.maskPoints.length; i++) {
-        const pt = this.maskPoints[i];
-        const px = pt[0] * w;
-        const py = pt[1] * h;
-        if (i === 0) this.ctx.moveTo(px, py);
-        else this.ctx.lineTo(px, py);
-      }
-      if (this.maskPoints.length >= 3) {
+        this.ctx.fillStyle = `${color}33`; // 20% opacity
+        this.ctx.strokeStyle = color;
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+
+        for (let i = 0; i < obs.points.length; i++) {
+          const pt = obs.points[i];
+          const px = pt[0] * w;
+          const py = pt[1] * h;
+          if (i === 0) this.ctx.moveTo(px, py);
+          else this.ctx.lineTo(px, py);
+        }
         this.ctx.closePath();
         this.ctx.fill();
-      }
-      this.ctx.stroke();
+        this.ctx.stroke();
 
-      // Draw vertices
-      this.ctx.fillStyle = '#ef4444';
-      for (const pt of this.maskPoints) {
-        this.ctx.fillRect(pt[0] * w - 3, pt[1] * h - 3, 6, 6);
+        // Draw vertex handles
+        this.ctx.fillStyle = color;
+        for (const pt of obs.points) {
+          this.ctx.fillRect(pt[0] * w - 3, pt[1] * h - 3, 6, 6);
+        }
+
+        // Draw obstacle label badge
+        if (obs.points.length > 0) {
+          const firstPx = obs.points[0][0] * w;
+          const firstPy = obs.points[0][1] * h;
+          this.ctx.font = '10px JetBrains Mono, monospace';
+          this.ctx.fillStyle = color;
+          this.ctx.fillText(`[#${idx + 1}] ${obs.label || 'Obstacle'}`, Math.max(10, firstPx - 10), Math.max(16, firstPy - 6));
+        }
+      });
+
+      // Draw active in-progress drawing points
+      if (this.isDrawingMask && this.drawingObstaclePoints.length > 0) {
+        this.ctx.strokeStyle = '#38bdf8';
+        this.ctx.lineWidth = 2;
+        this.ctx.setLineDash([4, 4]);
+        this.ctx.beginPath();
+
+        for (let i = 0; i < this.drawingObstaclePoints.length; i++) {
+          const pt = this.drawingObstaclePoints[i];
+          const px = pt[0] * w;
+          const py = pt[1] * h;
+          if (i === 0) this.ctx.moveTo(px, py);
+          else this.ctx.lineTo(px, py);
+        }
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        // Vertices
+        this.ctx.fillStyle = '#38bdf8';
+        for (const pt of this.drawingObstaclePoints) {
+          this.ctx.beginPath();
+          this.ctx.arc(pt[0] * w, pt[1] * h, 4, 0, 2 * Math.PI);
+          this.ctx.fill();
+        }
       }
     }
   }
@@ -420,9 +487,113 @@ class CalibrationStudio {
     }
     pts.push([1.0, 1.0]); // bottom-right
 
-    this.maskPoints = pts;
-    this.polygonMask = [...pts];
+    const existingIdx = this.obstacles.findIndex(o => o.id === 'ground_0deg');
+    const groundObs = {
+      id: 'ground_0deg',
+      label: 'Ground (<0° Alt)',
+      points: pts
+    };
+    if (existingIdx >= 0) {
+      this.obstacles[existingIdx] = groundObs;
+    } else {
+      this.obstacles.unshift(groundObs);
+    }
+
+    this.renderObstacleList();
     this.render();
+  }
+
+  async autoDetectObstacles() {
+    if (!this.activeCamera) return;
+    const btn = document.getElementById('btn-auto-detect-obstacles');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '🌲 Detecting...';
+    }
+
+    try {
+      const res = await fetch('/api/calibration/detect_obstacles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera_id: this.activeCamera.id })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Obstacle detection failed');
+      }
+      const data = await res.json();
+      if (!data.obstacles || data.obstacles.length === 0) {
+        if (window.showToast) {
+          showToast('No high-contrast obstacles found in sky view', 'info');
+        } else {
+          alert('No high-contrast obstacles found in sky view.');
+        }
+        return;
+      }
+
+      data.obstacles.forEach((obs, idx) => {
+        this.obstacles.push({
+          id: `auto_${Date.now()}_${idx}`,
+          label: obs.label || `Obstacle #${this.obstacles.length + 1}`,
+          points: obs.polygon
+        });
+      });
+
+      this.renderObstacleList();
+      this.render();
+      if (window.showToast) {
+        showToast(`Auto-detected ${data.obstacles.length} obstacle(s) (trees/poles)`, 'success');
+      }
+    } catch (e) {
+      if (window.showToast) {
+        showToast(`Obstacle detection error: ${e.message}`, 'error');
+      } else {
+        alert(`Obstacle detection error: ${e.message}`);
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    }
+  }
+
+  renderObstacleList() {
+    const container = document.getElementById('obstacle-list-container');
+    if (!container) return;
+
+    if (!this.obstacles || this.obstacles.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem;padding:4px;">No obstacles configured yet. Click "+ Draw Obstacle" or "Auto-Detect".</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    const colors = ['#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6', '#ec4899'];
+
+    this.obstacles.forEach((obs, idx) => {
+      const color = colors[idx % colors.length];
+      const row = document.createElement('div');
+      row.className = 'obstacle-item';
+      row.style.cssText = `display:flex; justify-content:space-between; align-items:center; padding:4px 8px; margin-bottom:4px; border-radius:4px; background:rgba(30,41,59,0.6); border-left:3px solid ${color}; font-size:0.8rem;`;
+
+      row.innerHTML = `
+        <span style="font-weight:500; color:var(--text-bright); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;">
+          #${idx + 1} ${obs.label || 'Obstacle'} (${obs.points.length} pts)
+        </span>
+        <button class="btn-icon" data-del-obs="${idx}" title="Delete obstacle" style="color:var(--accent-danger); cursor:pointer; background:none; border:none; padding:0 4px; font-size:1.1rem; line-height:1;">
+          &times;
+        </button>
+      `;
+
+      row.querySelector('[data-del-obs]').addEventListener('click', () => {
+        this.obstacles.splice(idx, 1);
+        this.renderObstacleList();
+        this.render();
+      });
+
+      container.appendChild(row);
+    });
   }
 
   handleCanvasMouseMove(e) {
@@ -446,11 +617,15 @@ class CalibrationStudio {
     const y = Math.round((e.clientY - rect.top) * scaleY);
 
     if (this.isDrawingMask) {
-      // Add normalized point
-      this.maskPoints.push([x / this.canvas.width, y / this.canvas.height]);
+      // Add normalized point to current drawing obstacle
+      this.drawingObstaclePoints.push([
+        Math.round((x / this.canvas.width) * 10000) / 10000,
+        Math.round((y / this.canvas.height) * 10000) / 10000
+      ]);
       this.render();
       return;
     }
+
 
     // Add star match
     const defaultStar = this.stars[this.starMatches.length % this.stars.length]?.id || 'polaris';

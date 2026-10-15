@@ -5,12 +5,18 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from backend.astrometry.camera_model import (
+    build_camera_rotation_matrix,
+    project_world_point_to_camera,
+)
 from backend.astrometry.celestial import get_all_celestial_objects, get_sun_coordinates
 from backend.config import ObserverConfig, OperatingMode, SkyViewConfig, TrackingConfig
 from backend.plugins.object_detection_plugin import ObjectDetectionPlugin
 from backend.plugins.weather_plugin import WeatherClassifierPlugin
+from backend.stitching.warp_lut import point_in_polygon
 from backend.tracking.adsb_tracker import ADSBTracker
 from backend.tracking.satellite_tracker import SatelliteTracker
+
 
 
 class OpticalTrack:
@@ -112,6 +118,41 @@ class OpticalTrackerEngine:
         py = v0 - r * math.cos(az_rad)
         return (px, py)
 
+    def is_point_in_obstacle_mask(self, alt: float, az: float) -> bool:
+        """
+        Returns True if the sky coordinate (alt, az) falls within any configured camera's
+        obstacle polygon masks (trees, poles, antennas, buildings).
+        """
+        alt_rad = math.radians(alt)
+        az_rad = math.radians(az)
+        cos_alt = math.cos(alt_rad)
+        v_world = np.array([
+            cos_alt * math.sin(az_rad),
+            cos_alt * math.cos(az_rad),
+            math.sin(alt_rad)
+        ], dtype=np.float64)
+
+        for cam in self.config.cameras:
+            if not cam.enabled:
+                continue
+            all_masks = cam.get_all_polygon_masks() if hasattr(cam, "get_all_polygon_masks") else (
+                cam.polygon_masks if getattr(cam, "polygon_masks", None) else [cam.polygon_mask]
+            )
+            if not all_masks:
+                continue
+
+            # Project into camera coordinates (using standard reference 1920x1080 for normalized coords)
+            R_w2c = build_camera_rotation_matrix(cam.extrinsics)
+            pt = project_world_point_to_camera(v_world, R_w2c, cam.intrinsics, 1920, 1080)
+            if pt is not None:
+                px, py = pt
+                norm_x = px / 1920.0
+                norm_y = py / 1080.0
+                if 0.0 <= norm_x <= 1.0 and 0.0 <= norm_y <= 1.0:
+                    if point_in_polygon(px, py, all_masks, 1920, 1080):
+                        return True
+        return False
+
     def process_stitched_frame(self, frame: np.ndarray) -> Dict:
         """
         Runs motion detection, tracks active objects, executes multi-source
@@ -157,9 +198,11 @@ class OpticalTrackerEngine:
                         cx = M["m10"] / M["m00"]
                         cy = M["m01"] / M["m00"]
                         # Filter out static ground objects and traffic below horizon
-                        alt, _ = self.pixel_to_altaz(cx, cy, w, h)
+                        alt, az = self.pixel_to_altaz(cx, cy, w, h)
                         if alt >= min_elev:
-                            detected_centroids.append((cx, cy))
+                            # Filter out motion originating within obstacle masks (swaying trees, vibrating poles)
+                            if not self.is_point_in_obstacle_mask(alt, az):
+                                detected_centroids.append((cx, cy))
 
         self._prev_frame = blurred
 

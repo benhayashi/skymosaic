@@ -447,26 +447,56 @@ function initCalibrationEvents() {
     await calibrationStudio.autoPlateSolve();
   });
 
-  // Mask drawing & auto ground mask
+  // Mask drawing, auto-detection & auto ground mask
+  document.getElementById('btn-auto-detect-obstacles')?.addEventListener('click', async () => {
+    await calibrationStudio.autoDetectObstacles();
+  });
+
   document.getElementById('btn-auto-mask-ground')?.addEventListener('click', () => {
     calibrationStudio.autoMaskGround();
-    showToast('Sub-horizon ground (&lt;0° Alt) masked', 'info');
+    showToast('Sub-horizon ground (&lt;0° Alt) added as obstacle', 'info');
   });
 
   document.getElementById('btn-start-mask')?.addEventListener('click', (e) => {
-    calibrationStudio.isDrawingMask = !calibrationStudio.isDrawingMask;
-    e.target.textContent = calibrationStudio.isDrawingMask ? 'Finish Mask' : 'Draw Mask';
     if (!calibrationStudio.isDrawingMask) {
-      calibrationStudio.polygonMask = [...calibrationStudio.maskPoints];
-      showToast('Obstacle polygon mask set', 'info');
+      calibrationStudio.isDrawingMask = true;
+      calibrationStudio.drawingObstaclePoints = [];
+      e.target.textContent = 'Finish Obstacle';
+      e.target.classList.replace('btn-secondary', 'btn-primary');
+      showToast('Click points around obstacle in viewport', 'info');
+      calibrationStudio.render();
+    } else {
+      if (calibrationStudio.drawingObstaclePoints.length >= 3) {
+        calibrationStudio.obstacles.push({
+          id: `obs_${Date.now()}`,
+          label: `Obstacle #${calibrationStudio.obstacles.length + 1}`,
+          points: [...calibrationStudio.drawingObstaclePoints]
+        });
+        showToast('Obstacle polygon added', 'success');
+      } else if (calibrationStudio.drawingObstaclePoints.length > 0) {
+        showToast('Obstacle requires at least 3 points', 'warning');
+      }
+      calibrationStudio.isDrawingMask = false;
+      calibrationStudio.drawingObstaclePoints = [];
+      e.target.textContent = '+ Draw Obstacle';
+      e.target.classList.replace('btn-primary', 'btn-secondary');
+      calibrationStudio.renderObstacleList();
+      calibrationStudio.render();
     }
   });
 
   document.getElementById('btn-clear-mask')?.addEventListener('click', () => {
-    calibrationStudio.maskPoints = [];
-    calibrationStudio.polygonMask = [];
+    calibrationStudio.obstacles = [];
+    calibrationStudio.drawingObstaclePoints = [];
+    calibrationStudio.isDrawingMask = false;
+    const btn = document.getElementById('btn-start-mask');
+    if (btn) {
+      btn.textContent = '+ Draw Obstacle';
+      btn.classList.replace('btn-primary', 'btn-secondary');
+    }
+    calibrationStudio.renderObstacleList();
     calibrationStudio.render();
-    showToast('Mask cleared', 'info');
+    showToast('All obstacles cleared', 'info');
   });
 
   // Save Calibration
@@ -480,7 +510,11 @@ function initCalibrationEvents() {
     cam.intrinsics.fov_deg = calibrationStudio.fov;
     cam.intrinsics.lens_model = calibrationStudio.lensModel;
     cam.intrinsics.k1 = calibrationStudio.k1;
-    cam.polygon_mask = calibrationStudio.polygonMask;
+
+    // Save multi-obstacle polygons and tracking-only mode
+    cam.polygon_masks = calibrationStudio.obstacles.map(o => o.points);
+    cam.polygon_mask = calibrationStudio.obstacles.length > 0 ? [...calibrationStudio.obstacles[0].points] : [];
+    cam.mask_tracking_only = document.getElementById('calib-mask-tracking-only')?.checked ?? true;
 
     try {
       const res = await fetch(`/api/cameras/${cam.id}`, {
@@ -1418,8 +1452,8 @@ function initGeolocationControls() {
   const sourceBadge = document.getElementById('location-source-badge');
 
   const applyCoordinates = (lat, lon, elevationM = null, tz = null, source = 'Device GPS', accuracyM = null) => {
-    document.getElementById('set-lat').value = lat.toFixed(4);
-    document.getElementById('set-lon').value = lon.toFixed(4);
+    document.getElementById('set-lat').value = lat.toFixed(5);
+    document.getElementById('set-lon').value = lon.toFixed(5);
 
     if (elevationM != null && !isNaN(elevationM)) {
       if (currentUnitSystem === 'us') {
@@ -1444,13 +1478,137 @@ function initGeolocationControls() {
       sourceBadge.style.borderColor = 'var(--accent-success)';
     }
 
-    let msg = `Acquired ${lat.toFixed(4)}°, ${lon.toFixed(4)}° via ${source}`;
+    let msg = `Acquired ${lat.toFixed(5)}°, ${lon.toFixed(5)}° via ${source}`;
     if (accuracyM != null) {
       msg += ` (±${Math.round(accuracyM)}m)`;
     }
     if (statusText) statusText.textContent = msg;
     showToast(msg, 'success');
+
+    if (observerMap && observerMarker) {
+      updateMapMarker(lat, lon, false);
+    }
   };
+
+  // Leaflet Interactive Map Picker
+  let observerMap = null;
+  let observerMarker = null;
+  let streetLayer = null;
+  let satLayer = null;
+
+  const btnToggleMap = document.getElementById('btn-toggle-map-picker');
+  const mapPanel = document.getElementById('map-picker-panel');
+  const btnStreet = document.getElementById('btn-map-layer-street');
+  const btnSat = document.getElementById('btn-map-layer-sat');
+  const mapCoordsText = document.getElementById('map-pin-coords');
+
+  const updateMapMarker = (lat, lon, zoomTo = false) => {
+    if (!observerMap || typeof L === 'undefined') return;
+    if (!observerMarker) {
+      observerMarker = L.marker([lat, lon], { draggable: true }).addTo(observerMap);
+      observerMarker.on('dragend', (e) => {
+        const pos = e.target.getLatLng();
+        applyCoordinates(pos.lat, pos.lng, null, null, 'Interactive Map Pin');
+        updateMapCoordsText(pos.lat, pos.lng);
+      });
+    } else {
+      observerMarker.setLatLng([lat, lon]);
+    }
+
+    if (zoomTo) {
+      observerMap.setView([lat, lon], Math.max(16, observerMap.getZoom()));
+    }
+    updateMapCoordsText(lat, lon);
+  };
+
+  const updateMapCoordsText = (lat, lon) => {
+    if (mapCoordsText) {
+      const latStr = `${Math.abs(lat).toFixed(5)}° ${lat >= 0 ? 'N' : 'S'}`;
+      const lonStr = `${Math.abs(lon).toFixed(5)}° ${lon >= 0 ? 'E' : 'W'}`;
+      mapCoordsText.textContent = `Coordinates: ${latStr}, ${lonStr}`;
+    }
+  };
+
+  const initObserverMap = () => {
+    if (observerMap || typeof L === 'undefined') return;
+
+    const lat = parseFloat(document.getElementById('set-lat').value) || appConfig?.observer?.latitude || 40.7128;
+    const lon = parseFloat(document.getElementById('set-lon').value) || appConfig?.observer?.longitude || -74.0060;
+
+    observerMap = L.map('observer-map').setView([lat, lon], 16);
+
+    streetLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    });
+
+    satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: '&copy; Esri, Maxar'
+    });
+
+    streetLayer.addTo(observerMap);
+    updateMapMarker(lat, lon);
+
+    observerMap.on('click', (e) => {
+      const { lat, lng } = e.latlng;
+      updateMapMarker(lat, lng);
+      applyCoordinates(lat, lng, null, null, 'Interactive Map Pin');
+    });
+
+    btnStreet?.addEventListener('click', () => {
+      if (!observerMap) return;
+      observerMap.removeLayer(satLayer);
+      streetLayer.addTo(observerMap);
+      btnStreet.classList.replace('btn-outline', 'btn-primary');
+      btnSat?.classList.replace('btn-primary', 'btn-outline');
+    });
+
+    btnSat?.addEventListener('click', () => {
+      if (!observerMap) return;
+      observerMap.removeLayer(streetLayer);
+      satLayer.addTo(observerMap);
+      btnSat.classList.replace('btn-outline', 'btn-primary');
+      btnStreet?.classList.replace('btn-primary', 'btn-outline');
+    });
+  };
+
+  btnToggleMap?.addEventListener('click', () => {
+    if (!mapPanel) return;
+    const isOpen = mapPanel.style.display !== 'none';
+    if (isOpen) {
+      mapPanel.style.display = 'none';
+      btnToggleMap.classList.remove('btn-secondary');
+      btnToggleMap.classList.add('btn-outline');
+    } else {
+      mapPanel.style.display = 'block';
+      btnToggleMap.classList.remove('btn-outline');
+      btnToggleMap.classList.add('btn-secondary');
+      if (!observerMap) {
+        initObserverMap();
+      } else {
+        const curLat = parseFloat(document.getElementById('set-lat').value);
+        const curLon = parseFloat(document.getElementById('set-lon').value);
+        if (!isNaN(curLat) && !isNaN(curLon)) {
+          updateMapMarker(curLat, curLon, true);
+        }
+      }
+      setTimeout(() => {
+        if (observerMap) observerMap.invalidateSize();
+      }, 150);
+    }
+  });
+
+  // Sync typed inputs with map pin
+  ['set-lat', 'set-lon'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', () => {
+      const curLat = parseFloat(document.getElementById('set-lat').value);
+      const curLon = parseFloat(document.getElementById('set-lon').value);
+      if (!isNaN(curLat) && !isNaN(curLon) && observerMap) {
+        updateMapMarker(curLat, curLon, false);
+      }
+    });
+  });
 
   btnGps?.addEventListener('click', () => {
     if (!('geolocation' in navigator)) {

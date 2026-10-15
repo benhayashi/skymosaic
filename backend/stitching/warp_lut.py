@@ -1,5 +1,5 @@
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 
@@ -15,24 +15,48 @@ from backend.config import (
 )
 
 
-def point_in_polygon(px: float, py: float, poly: List[List[float]], img_w: int, img_h: int) -> bool:
-    """Checks if pixel (px, py) is inside normalized polygon vertices [[x0, y0], [x1, y1], ...]."""
-    if len(poly) < 3:
-        return False
-    # Scale polygon to absolute pixels
-    poly_pts = np.array([[p[0] * img_w, p[1] * img_h] for p in poly], dtype=np.int32)
-    return cv2.pointPolygonTest(poly_pts, (px, py), False) >= 0
-
-
-def generate_camera_polygon_mask(poly: List[List[float]], img_w: int, img_h: int) -> np.ndarray:
+def normalize_polygon_list(poly_input: Any) -> List[List[List[float]]]:
     """
-    Creates a binary mask (uint8) where 255 = valid sky, 0 = masked obstacle (ground, roof).
+    Normalizes either a single polygon [[x,y],...] or multiple polygons [[[x,y],...],...]
+    into a standardized list of polygons [[[x,y],...], ...].
+    """
+    if not poly_input:
+        return []
+    if isinstance(poly_input, (list, tuple)) and len(poly_input) > 0:
+        first = poly_input[0]
+        if isinstance(first, (list, tuple)) and len(first) > 0:
+            if isinstance(first[0], (int, float)):
+                # Single polygon [[x, y], [x, y], ...]
+                return [poly_input]
+            elif isinstance(first[0], (list, tuple)):
+                # List of polygons [[[x, y], ...], ...]
+                return poly_input
+    return []
+
+
+def point_in_polygon(px: float, py: float, poly: Any, img_w: int, img_h: int) -> bool:
+    """Checks if pixel (px, py) is inside normalized polygon vertices."""
+    polys = normalize_polygon_list(poly)
+    for p in polys:
+        if len(p) >= 3:
+            poly_pts = np.array([[pt[0] * img_w, pt[1] * img_h] for pt in p], dtype=np.int32)
+            if cv2.pointPolygonTest(poly_pts, (px, py), False) >= 0:
+                return True
+    return False
+
+
+def generate_camera_polygon_mask(poly: Any, img_w: int, img_h: int) -> np.ndarray:
+    """
+    Creates a binary mask (uint8) where 255 = valid sky, 0 = masked obstacle (ground, tree, pole, roof).
+    Supports either a single polygon [[x, y], ...] or multiple polygons [[[x, y], ...], ...].
     """
     mask = np.full((img_h, img_w), 255, dtype=np.uint8)
-    if len(poly) >= 3:
-        pts = np.array([[int(round(p[0] * img_w)), int(round(p[1] * img_h))] for p in poly], dtype=np.int32)
-        # Fill masked obstacle region with 0
-        cv2.fillPoly(mask, [pts], 0)
+    polys = normalize_polygon_list(poly)
+    for p in polys:
+        if len(p) >= 3:
+            pts = np.array([[int(round(pt[0] * img_w)), int(round(pt[1] * img_h))] for pt in p], dtype=np.int32)
+            # Fill masked obstacle region with 0
+            cv2.fillPoly(mask, [pts], 0)
     return mask
 
 
@@ -233,9 +257,14 @@ def compute_camera_remap_lut(
         above_horizon = vz_val >= min_sin_alt
         in_bounds = in_bounds & above_horizon
 
-    # Apply polygon obstacle mask if configured
-    if len(camera_cfg.polygon_mask) >= 3:
-        poly_mask = generate_camera_polygon_mask(camera_cfg.polygon_mask, img_w, img_h)
+    # Apply polygon obstacle mask if configured and cutout mode is active (not tracking-only)
+    mask_tracking_only = getattr(camera_cfg, "mask_tracking_only", True)
+    all_masks = getattr(camera_cfg, "get_all_polygon_masks", lambda: [])()
+    if not all_masks and len(camera_cfg.polygon_mask) >= 3:
+        all_masks = [camera_cfg.polygon_mask]
+
+    if not mask_tracking_only and len(all_masks) > 0 and in_bounds.any():
+        poly_mask = generate_camera_polygon_mask(all_masks, img_w, img_h)
         # Sample polygon mask at rounded pixel locations only for in_bounds points
         px_int = np.clip(np.round(px[in_bounds]).astype(np.int32), 0, img_w - 1)
         py_int = np.clip(np.round(py[in_bounds]).astype(np.int32), 0, img_h - 1)

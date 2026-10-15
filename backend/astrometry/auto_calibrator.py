@@ -157,9 +157,13 @@ class AutoCalibrationManager:
                 # Generate obstacle mask if polygon_mask is defined on camera
                 h_f, w_f = frame.shape[:2]
                 obs_mask = None
-                if len(cam.polygon_mask) >= 3:
+                all_masks = cam.get_all_polygon_masks() if hasattr(cam, "get_all_polygon_masks") else (
+                    cam.polygon_masks if getattr(cam, "polygon_masks", None) else ([cam.polygon_mask] if len(cam.polygon_mask) >= 3 else [])
+                )
+                if all_masks:
                     from backend.stitching.warp_lut import generate_camera_polygon_mask
-                    obs_mask = generate_camera_polygon_mask(cam.polygon_mask, w_f, h_f)
+                    obs_mask = generate_camera_polygon_mask(all_masks, w_f, h_f)
+
 
                 solve_res = auto_plate_solve_camera(
                     image=frame,

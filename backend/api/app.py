@@ -100,6 +100,11 @@ class StarDetectionRequest(BaseModel):
     image_path: Optional[str] = None
 
 
+class DetectObstaclesRequest(BaseModel):
+    camera_id: Optional[str] = None
+    image_path: Optional[str] = None
+
+
 class GenerateMediaRequest(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -241,6 +246,7 @@ def add_camera(camera: CameraConfig):
     save_config(app_config, CONFIG_PATH)
     stream_manager.update_config(app_config)
     stitcher.update_config(app_config)
+    tracker_engine.update_config(app_config)
     return {"status": "ok", "camera": camera}
 
 
@@ -252,6 +258,7 @@ def update_camera(camera_id: str, updated_cam: CameraConfig):
             save_config(app_config, CONFIG_PATH)
             stream_manager.update_config(app_config)
             stitcher.update_config(app_config)
+            tracker_engine.update_config(app_config)
             return {"status": "ok", "camera": updated_cam}
     raise HTTPException(status_code=404, detail="Camera not found.")
 
@@ -262,7 +269,9 @@ def delete_camera(camera_id: str):
     save_config(app_config, CONFIG_PATH)
     stream_manager.update_config(app_config)
     stitcher.update_config(app_config)
+    tracker_engine.update_config(app_config)
     return {"status": "ok"}
+
 
 
 @app.get("/api/cameras/{camera_id}/frame")
@@ -334,6 +343,28 @@ def detect_stars_endpoint(req: StarDetectionRequest):
 
     stars = detect_star_centroids(img)
     return {"stars": stars, "count": len(stars), "width": img.shape[1], "height": img.shape[0]}
+
+
+@app.post("/api/calibration/detect_obstacles")
+def detect_obstacles_endpoint(req: DetectObstaclesRequest):
+    img = None
+    if req.camera_id:
+        img = stream_manager.get_camera_frame(req.camera_id)
+    elif req.image_path:
+        img = cv2.imread(req.image_path)
+
+    if img is None:
+        raise HTTPException(status_code=400, detail="No active camera frame available for obstacle detection.")
+
+    from backend.astrometry.obstacle_detector import detect_sky_obstacles
+    obstacles = detect_sky_obstacles(img)
+    return {
+        "obstacles": obstacles,
+        "count": len(obstacles),
+        "width": img.shape[1],
+        "height": img.shape[0]
+    }
+
 
 
 @app.post("/api/calibration/solve")

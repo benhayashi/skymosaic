@@ -63,10 +63,30 @@ class CameraConfig(BaseModel):
     intrinsics: CameraIntrinsics = Field(default_factory=CameraIntrinsics)
     polygon_mask: List[List[float]] = Field(
         default_factory=list,
-        description="List of [x, y] normalized vertices (0.0 to 1.0) defining masked/ignored areas (ground/obstructions)"
+        description="Legacy single polygon: list of [x, y] normalized vertices (0.0 to 1.0) defining masked/ignored areas"
+    )
+    polygon_masks: List[List[List[float]]] = Field(
+        default_factory=list,
+        description="List of distinct obstacle polygons [[[x, y], ...], ...], such as trees, poles, and structures"
+    )
+    mask_tracking_only: bool = Field(
+        default=True,
+        description="If True, masked obstacles remain visible on dome feed but are ignored during motion detection and star plate solving. If False, obstacles are cut out (blacked out) from the canvas."
     )
     gain_scale: float = Field(default=1.0, description="Brightness gain multiplier for exposure matching")
     min_elevation_deg: float = Field(default=0.0, description="Minimum elevation angle in degrees; points below this are masked out (removes ground/roads/cars)")
+
+    def get_all_polygon_masks(self) -> List[List[List[float]]]:
+        """Returns consolidated list of all obstacle polygons for this camera."""
+        all_masks: List[List[List[float]]] = []
+        if self.polygon_masks:
+            for p in self.polygon_masks:
+                if len(p) >= 3:
+                    all_masks.append(p)
+        if len(self.polygon_mask) >= 3:
+            if self.polygon_mask not in all_masks:
+                all_masks.append(self.polygon_mask)
+        return all_masks
 
 
 class StitchingConfig(BaseModel):
