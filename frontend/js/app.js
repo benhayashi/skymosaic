@@ -665,7 +665,106 @@ function initActionButtons() {
       document.exitFullscreen();
     }
   });
+
+  initZoomControls();
+  initDvrControls();
 }
+
+// Canvas Pan & Zoom HUD controls
+function initZoomControls() {
+  document.getElementById('btn-zoom-in')?.addEventListener('click', () => {
+    skyViewer?.zoomIn();
+  });
+
+  document.getElementById('btn-zoom-out')?.addEventListener('click', () => {
+    skyViewer?.zoomOut();
+  });
+
+  document.getElementById('btn-zoom-reset')?.addEventListener('click', () => {
+    skyViewer?.resetZoom();
+  });
+}
+
+// DVR Playback & Time-Shift Rewind Controls
+function initDvrControls() {
+  const btnPlayPause = document.getElementById('btn-dvr-play-pause');
+  const btnRewind30 = document.getElementById('btn-dvr-rewind-30');
+  const btnRewind10 = document.getElementById('btn-dvr-rewind-10');
+  const btnForward10 = document.getElementById('btn-dvr-forward-10');
+  const btnJumpLive = document.getElementById('btn-dvr-jump-live');
+  const liveBadge = document.getElementById('dvr-live-badge');
+  const slider = document.getElementById('dvr-scrub-slider');
+  const offsetText = document.getElementById('dvr-current-offset-text');
+  const speedBtn = document.getElementById('dvr-speed-btn');
+  const speedMenu = document.querySelector('.dvr-speed-menu');
+
+  btnPlayPause?.addEventListener('click', () => {
+    skyViewer?.togglePlayPause();
+  });
+
+  btnRewind30?.addEventListener('click', () => {
+    skyViewer?.stepRelative(-30);
+  });
+
+  btnRewind10?.addEventListener('click', () => {
+    skyViewer?.stepRelative(-10);
+  });
+
+  btnForward10?.addEventListener('click', () => {
+    skyViewer?.stepRelative(10);
+  });
+
+  btnJumpLive?.addEventListener('click', () => {
+    skyViewer?.jumpToLive();
+  });
+
+  liveBadge?.addEventListener('click', () => {
+    skyViewer?.jumpToLive();
+  });
+
+  slider?.addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    if (offsetText) {
+      if (val >= -0.5) {
+        offsetText.textContent = 'LIVE';
+        offsetText.style.color = 'var(--accent-emerald)';
+      } else {
+        const absSec = Math.abs(Math.round(val));
+        const m = Math.floor(absSec / 60);
+        const s = absSec % 60;
+        offsetText.textContent = `-${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        offsetText.style.color = 'var(--accent-amber)';
+      }
+    }
+    skyViewer?.seekToOffset(val, false);
+  });
+
+  slider?.addEventListener('change', (e) => {
+    const val = parseFloat(e.target.value);
+    skyViewer?.seekToOffset(val, true);
+  });
+
+  speedBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    speedMenu?.classList.toggle('show');
+  });
+
+  document.querySelectorAll('.dvr-speed-menu button').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const speed = parseFloat(e.target.dataset.speed);
+      skyViewer?.setPlaybackRate(speed);
+      document.querySelectorAll('.dvr-speed-menu button').forEach(b => b.classList.remove('active'));
+      e.target.classList.add('active');
+      speedMenu?.classList.remove('show');
+    });
+  });
+
+  window.addEventListener('click', () => {
+    speedMenu?.classList.remove('show');
+  });
+}
+
 
 
 // Mode Switcher (Feed vs Long-Exposure / Timelapse vs Test Preview)

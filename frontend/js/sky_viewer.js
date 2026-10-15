@@ -4,7 +4,7 @@ class SkyViewer {
     this.ctx = this.canvas.getContext('2d');
     this.img = new Image();
     this.isRunning = false;
-    this.pollInterval = 2000; // 2 seconds
+    this.pollInterval = 1000; // 1 second
     this.showAnnotations = true;
     this.showConstellations = false;
     this.showTracking = true;
@@ -15,10 +15,203 @@ class SkyViewer {
     this.constellations = [];
     this.targets = [];
 
+    // --- Pan & Zoom State ---
+    this.zoom = 1.0;
+    this.minZoom = 0.8;
+    this.maxZoom = 10.0;
+    this.panX = 0.0;
+    this.panY = 0.0;
+    this.isDragging = false;
+    this.dragStartX = 0;
+    this.dragStartY = 0;
+    this.lastTouchDist = null;
+
+    // --- DVR & Playback State ---
+    this.isLive = true;
+    this.isPlaying = false;
+    this.playbackRate = 1.0; // 0.5, 1.0, 2.0, 4.0
+    this.dvrOffsetSec = 0.0; // 0 = live, negative = past
+    this.currentFrameTimestamp = null;
+    this.bufferDurationSec = 1800; // 30 minutes default
+    this.clientFrameCache = []; // Ring buffer of recent frames [{ offsetSec, timestamp, img }]
+    this.maxCacheSize = 90;
+    this.dvrTimelineTimer = null;
+
+    this.initImageLoader();
+    this.initPanZoomEvents();
+  }
+
+  initImageLoader() {
     this.img.onload = () => {
       this.render();
       document.getElementById('sky-loader')?.classList.add('hidden');
+
+      // Cache this frame if in live mode
+      if (this.isLive && this.img.src.startsWith('blob:') === false) {
+        this.cacheCurrentFrame(0.0, new Date().toISOString(), this.img.src);
+      }
     };
+  }
+
+  cacheCurrentFrame(offsetSec, timestamp, src) {
+    // Keep client-side cache of recent frames for zero-latency slider scrubbing
+    if (this.clientFrameCache.length >= this.maxCacheSize) {
+      this.clientFrameCache.shift();
+    }
+    // Update existing offsets slightly
+    this.clientFrameCache.push({
+      offsetSec: offsetSec,
+      timestamp: timestamp,
+      src: src
+    });
+  }
+
+  initPanZoomEvents() {
+    if (!this.canvas) return;
+
+    // 1. Mouse Wheel Zoom (Anchored to Cursor)
+    this.canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+
+      const rect = this.canvas.getBoundingClientRect();
+      // Mouse position relative to canvas center
+      const mouseX = (e.clientX - rect.left) - (rect.width / 2);
+      const mouseY = (e.clientY - rect.top) - (rect.height / 2);
+
+      const zoomFactor = e.deltaY < 0 ? 1.18 : (1.0 / 1.18);
+      const oldZoom = this.zoom;
+      let newZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom * zoomFactor));
+
+      // Snap near 1.0x
+      if (Math.abs(newZoom - 1.0) < 0.04) {
+        newZoom = 1.0;
+      }
+
+      if (newZoom !== oldZoom) {
+        // Shift pan so that the coordinate under mouse pointer stays under mouse pointer
+        if (newZoom === 1.0) {
+          this.panX = 0;
+          this.panY = 0;
+        } else {
+          this.panX = mouseX - (mouseX - this.panX) * (newZoom / oldZoom);
+          this.panY = mouseY - (mouseY - this.panY) * (newZoom / oldZoom);
+        }
+        this.zoom = newZoom;
+        this.updateZoomUI();
+        this.render();
+      }
+    }, { passive: false });
+
+    // 2. Mouse Drag Pan
+    this.canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return; // Left click only
+      this.isDragging = true;
+      this.dragStartX = e.clientX - this.panX;
+      this.dragStartY = e.clientY - this.panY;
+      this.canvas.style.cursor = 'grabbing';
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!this.isDragging) return;
+      this.panX = e.clientX - this.dragStartX;
+      this.panY = e.clientY - this.dragStartY;
+      this.render();
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (this.isDragging) {
+        this.isDragging = false;
+        this.updateCursor();
+      }
+    });
+
+    // 3. Double-Click to Reset Zoom & Pan
+    this.canvas.addEventListener('dblclick', () => {
+      this.resetZoom();
+    });
+
+    // 4. Touch Gestures: Pinch-to-zoom & single-finger pan for mobile
+    this.canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        this.isDragging = true;
+        this.dragStartX = e.touches[0].clientX - this.panX;
+        this.dragStartY = e.touches[0].clientY - this.panY;
+      } else if (e.touches.length === 2) {
+        this.isDragging = false;
+        this.lastTouchDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+      }
+    }, { passive: true });
+
+    this.canvas.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1 && this.isDragging) {
+        this.panX = e.touches[0].clientX - this.dragStartX;
+        this.panY = e.touches[0].clientY - this.dragStartY;
+        this.render();
+      } else if (e.touches.length === 2 && this.lastTouchDist) {
+        const curDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        const factor = curDist / this.lastTouchDist;
+        this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom * factor));
+        this.lastTouchDist = curDist;
+        this.updateZoomUI();
+        this.render();
+      }
+    }, { passive: true });
+
+    this.canvas.addEventListener('touchend', () => {
+      this.isDragging = false;
+      this.lastTouchDist = null;
+    }, { passive: true });
+  }
+
+  updateCursor() {
+    if (!this.canvas) return;
+    this.canvas.style.cursor = this.zoom > 1.05 ? 'grab' : 'default';
+  }
+
+  zoomIn() {
+    this.setZoom(Math.min(this.maxZoom, this.zoom * 1.3));
+  }
+
+  zoomOut() {
+    this.setZoom(Math.max(this.minZoom, this.zoom / 1.3));
+  }
+
+  setZoom(newZoom) {
+    const oldZoom = this.zoom;
+    this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, newZoom));
+    if (this.zoom === 1.0) {
+      this.panX = 0;
+      this.panY = 0;
+    }
+    this.updateZoomUI();
+    this.render();
+  }
+
+  resetZoom() {
+    this.zoom = 1.0;
+    this.panX = 0.0;
+    this.panY = 0.0;
+    this.updateZoomUI();
+    this.render();
+  }
+
+  updateZoomUI() {
+    this.updateCursor();
+    const badge = document.getElementById('val-canvas-zoom');
+    if (badge) {
+      badge.textContent = `${this.zoom.toFixed(1)}x`;
+      badge.style.display = this.zoom !== 1.0 ? 'inline-block' : 'none';
+    }
+    const resetBtn = document.getElementById('btn-zoom-reset');
+    if (resetBtn) {
+      resetBtn.style.opacity = (this.zoom !== 1.0 || this.panX !== 0 || this.panY !== 0) ? '1.0' : '0.4';
+    }
   }
 
   setUnitSystem(unit) {
@@ -40,6 +233,7 @@ class SkyViewer {
     this.isRunning = true;
     this.fetchFrame();
     this.fetchAstrometryData();
+    this.pollDvrTimeline();
   }
 
   stop() {
@@ -48,14 +242,175 @@ class SkyViewer {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    if (this.dvrTimelineTimer) {
+      clearTimeout(this.dvrTimelineTimer);
+      this.dvrTimelineTimer = null;
+    }
+  }
+
+  // --- DVR & Time-Shift Functions ---
+
+  async pollDvrTimeline() {
+    try {
+      const res = await fetch('/api/sky/dvr/timeline');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.buffer_duration_sec > 0) {
+          this.bufferDurationSec = Math.max(60, data.buffer_duration_sec);
+          this.updateDvrTimelineUI(data);
+        }
+      }
+    } catch (_) {}
+
+    if (this.isRunning) {
+      this.dvrTimelineTimer = setTimeout(() => this.pollDvrTimeline(), 5000);
+    }
+  }
+
+  updateDvrTimelineUI(data) {
+    const slider = document.getElementById('dvr-scrub-slider');
+    const startLabel = document.getElementById('dvr-start-time-label');
+    if (slider) {
+      const totalSec = Math.round(data.buffer_duration_sec || 1800);
+      slider.min = -totalSec;
+      slider.max = 0;
+      if (this.isLive) {
+        slider.value = 0;
+      }
+    }
+    if (startLabel && data.buffer_duration_sec > 0) {
+      const mins = Math.round(data.buffer_duration_sec / 60);
+      startLabel.textContent = `-${mins}m`;
+    }
+  }
+
+  seekToOffset(offsetSec, updateSlider = true) {
+    const num = parseFloat(offsetSec);
+    if (isNaN(num)) return;
+
+    if (num >= -0.5) {
+      this.jumpToLive();
+      return;
+    }
+
+    this.isLive = false;
+    this.dvrOffsetSec = num;
+
+    if (updateSlider) {
+      const slider = document.getElementById('dvr-scrub-slider');
+      if (slider) slider.value = Math.round(this.dvrOffsetSec);
+    }
+
+    this.updateDvrPlayerUI();
+
+    // Fetch frame for this offset
+    const overlayParam = this.showAnnotations ? 'true' : 'false';
+    const tsParam = this.showTimestamp ? 'true' : 'false';
+    this.img.src = `/api/sky/dvr/frame?offset_sec=${this.dvrOffsetSec.toFixed(1)}&overlay=${overlayParam}&timestamp=${tsParam}&t=${Date.now()}`;
+  }
+
+  jumpToLive() {
+    this.isLive = true;
+    this.isPlaying = false;
+    this.dvrOffsetSec = 0.0;
+    const slider = document.getElementById('dvr-scrub-slider');
+    if (slider) slider.value = 0;
+
+    this.updateDvrPlayerUI();
+    this.fetchFrame();
+  }
+
+  togglePlayPause() {
+    if (this.isLive) {
+      // Pause at current moment
+      this.isLive = false;
+      this.isPlaying = false;
+      this.dvrOffsetSec = 0.0;
+    } else {
+      this.isPlaying = !this.isPlaying;
+    }
+    this.updateDvrPlayerUI();
+  }
+
+  stepRelative(seconds) {
+    if (this.isLive && seconds < 0) {
+      this.isLive = false;
+      this.isPlaying = false;
+      this.dvrOffsetSec = seconds;
+    } else {
+      this.dvrOffsetSec = Math.min(0, this.dvrOffsetSec + seconds);
+    }
+
+    if (this.dvrOffsetSec >= 0) {
+      this.jumpToLive();
+    } else {
+      this.seekToOffset(this.dvrOffsetSec, true);
+    }
+  }
+
+  setPlaybackRate(rate) {
+    this.playbackRate = parseFloat(rate) || 1.0;
+    const rateBtn = document.getElementById('dvr-speed-btn');
+    if (rateBtn) rateBtn.textContent = `${this.playbackRate}x`;
+  }
+
+  updateDvrPlayerUI() {
+    const badge = document.getElementById('dvr-live-badge');
+    const playBtn = document.getElementById('btn-dvr-play-pause');
+    const offsetText = document.getElementById('dvr-current-offset-text');
+
+    if (this.isLive) {
+      if (badge) {
+        badge.className = 'dvr-badge live';
+        badge.innerHTML = '<span class="live-dot"></span> LIVE';
+      }
+      if (playBtn) {
+        playBtn.innerHTML = '⏸';
+        playBtn.title = 'Pause Live Stream (Enter DVR Mode)';
+      }
+      if (offsetText) {
+        offsetText.textContent = 'LIVE';
+        offsetText.style.color = 'var(--accent-emerald)';
+      }
+    } else {
+      if (badge) {
+        badge.className = 'dvr-badge rewound';
+        badge.innerHTML = '⏮ REWIND (Click for Live)';
+      }
+      if (playBtn) {
+        playBtn.innerHTML = this.isPlaying ? '⏸' : '▶';
+        playBtn.title = this.isPlaying ? 'Pause Playback' : 'Play Rewound Footage';
+      }
+      if (offsetText) {
+        const absSec = Math.abs(Math.round(this.dvrOffsetSec));
+        const m = Math.floor(absSec / 60);
+        const s = absSec % 60;
+        const formatted = `-${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        offsetText.textContent = formatted;
+        offsetText.style.color = 'var(--accent-amber)';
+      }
+    }
   }
 
   fetchFrame() {
     if (!this.isRunning) return;
-    // Cache-bust timestamp with overlay options
-    const overlayParam = this.showAnnotations ? 'true' : 'false';
-    const tsParam = this.showTimestamp ? 'true' : 'false';
-    this.img.src = `/api/sky/live.jpg?overlay=${overlayParam}&timestamp=${tsParam}&time_format=${this.timeFormat}&t=${Date.now()}`;
+
+    if (this.isLive) {
+      // Live stream mode
+      const overlayParam = this.showAnnotations ? 'true' : 'false';
+      const tsParam = this.showTimestamp ? 'true' : 'false';
+      this.img.src = `/api/sky/live.jpg?overlay=${overlayParam}&timestamp=${tsParam}&time_format=${this.timeFormat}&t=${Date.now()}`;
+    } else if (this.isPlaying) {
+      // Historical playback advancing forward
+      const advanceSec = (this.pollInterval / 1000.0) * this.playbackRate;
+      this.dvrOffsetSec += advanceSec;
+
+      if (this.dvrOffsetSec >= 0) {
+        this.jumpToLive();
+        return;
+      }
+      this.seekToOffset(this.dvrOffsetSec, true);
+    }
 
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
@@ -85,7 +440,16 @@ class SkyViewer {
   render() {
     const w = this.canvas.width;
     const h = this.canvas.height;
+
+    this.ctx.save();
     this.ctx.clearRect(0, 0, w, h);
+
+    // Apply Pan & Zoom transformations centered on the canvas
+    const cx = w / 2;
+    const cy = h / 2;
+    this.ctx.translate(cx + this.panX, cy + this.panY);
+    this.ctx.scale(this.zoom, this.zoom);
+    this.ctx.translate(-cx, -cy);
 
     // 1. Draw stitched image
     if (this.img.complete && this.img.naturalWidth > 0) {
@@ -101,6 +465,8 @@ class SkyViewer {
     if (this.showTracking && this.targets.length > 0) {
       this.renderTargets(w, h);
     }
+
+    this.ctx.restore();
   }
 
   renderTargets(w, h) {
@@ -119,11 +485,10 @@ class SkyViewer {
       if (cat === 'airplane') {
         // Cyan Aircraft Box HUD
         this.ctx.strokeRect(px - 10, py - 10, 20, 20);
-        // Heading indicator line if speed exists
         this.ctx.beginPath();
         this.ctx.arc(px, py, 3, 0, 2 * Math.PI);
         this.ctx.fill();
-        // Label badge with unit awareness
+
         let displayLabel = target.label;
         if (target.telemetry && target.telemetry.altitude_ft != null) {
           if (this.unitSystem === 'metric') {
@@ -150,26 +515,20 @@ class SkyViewer {
         this.ctx.lineWidth = 2;
         const b = 12;
         this.ctx.beginPath();
-        // Top-left bracket
         this.ctx.moveTo(px - b, py - b + 5); this.ctx.lineTo(px - b, py - b); this.ctx.lineTo(px - b + 5, py - b);
-        // Top-right bracket
         this.ctx.moveTo(px + b - 5, py - b); this.ctx.lineTo(px + b, py - b); this.ctx.lineTo(px + b, py - b + 5);
-        // Bottom-left bracket
         this.ctx.moveTo(px - b, py + b - 5); this.ctx.lineTo(px - b, py + b); this.ctx.lineTo(px - b + 5, py + b);
-        // Bottom-right bracket
         this.ctx.moveTo(px + b - 5, py + b); this.ctx.lineTo(px + b, py + b); this.ctx.lineTo(px + b, py + b - 5);
         this.ctx.stroke();
 
         this.ctx.fillStyle = '#ef4444';
         this.ctx.fillText(`⚠ ${target.label}`, px + 15, py + 4);
       } else if (cat === 'celestial') {
-        // Yellow subtle circle reticle
         this.ctx.beginPath();
         this.ctx.arc(px, py, 7, 0, 2 * Math.PI);
         this.ctx.stroke();
         this.ctx.fillText(target.label, px + 11, py - 4);
       } else if (cat === 'vision_ai') {
-        // Orange Object box
         this.ctx.strokeRect(px - 8, py - 8, 16, 16);
         this.ctx.fillText(`👁 ${target.label}`, px + 12, py + 3);
       }
@@ -186,7 +545,6 @@ class SkyViewer {
       const alt = star.altitude_deg;
       const az = star.azimuth_deg;
       if (alt < 0) return null;
-      // Zenithal polar mapping
       const theta = (90 - alt) * (Math.PI / 180);
       const r = (theta / (Math.PI / 2)) * rMax;
       const azRad = az * (Math.PI / 180);
@@ -195,13 +553,11 @@ class SkyViewer {
       return { x: px, y: py };
     };
 
-    // Index visible projected stars
     for (const s of this.stars) {
       const pt = projectStarToDome(s);
       if (pt) starMap[s.id] = pt;
     }
 
-    // Draw constellation lines
     this.ctx.strokeStyle = 'rgba(99, 102, 241, 0.45)';
     this.ctx.lineWidth = 1.2;
     this.ctx.beginPath();
@@ -215,7 +571,6 @@ class SkyViewer {
     }
     this.ctx.stroke();
 
-    // Draw prominent star labels
     this.ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
     this.ctx.font = '10px JetBrains Mono, monospace';
     for (const s of this.stars) {
@@ -226,4 +581,3 @@ class SkyViewer {
     }
   }
 }
-

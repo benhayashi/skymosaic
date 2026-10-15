@@ -31,6 +31,7 @@ from backend.ingestion.stream_manager import StreamManager
 from backend.config import OperatingMode
 from backend.pipeline.media_generator import MediaGenerator
 from backend.pipeline.storage_manager import StorageManager
+from backend.pipeline.dvr_manager import DVRManager
 from backend.stitching.stitcher import MultiCameraStitcher
 from backend.astrometry.auto_calibrator import AutoCalibrationManager
 from backend.tracking.optical_tracker import OpticalTrackerEngine
@@ -44,6 +45,9 @@ stitcher = MultiCameraStitcher(app_config)
 tracker_engine = OpticalTrackerEngine(app_config)
 storage_manager = StorageManager(app_config)
 storage_manager.start()
+dvr_manager = DVRManager(max_frames=1800, archive_dir=f"{app_config.data_dir}/archive")
+dvr_manager.start_auto_recording(stream_manager, stitcher, interval_sec=1.5)
+
 
 
 def apply_config_changes(new_config: SkyViewConfig):
@@ -449,7 +453,10 @@ def get_live_stitched_frame(
     ret, jpeg = cv2.imencode(".jpg", composite, [cv2.IMWRITE_JPEG_QUALITY, 88])
     if not ret:
         raise HTTPException(status_code=500, detail="Failed to encode composite.")
-    return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+
+    frame_bytes = jpeg.tobytes()
+    dvr_manager.add_frame(frame_bytes)
+    return Response(content=frame_bytes, media_type="image/jpeg")
 
 
 
@@ -461,6 +468,7 @@ def mjpeg_stream_generator():
             ret, jpeg = cv2.imencode(".jpg", composite, [cv2.IMWRITE_JPEG_QUALITY, 80])
             if ret:
                 frame_bytes = jpeg.tobytes()
+                dvr_manager.add_frame(frame_bytes)
                 yield (b"--frame\r\n"
                        b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n")
         except Exception as e:
@@ -475,6 +483,48 @@ def get_mjpeg_stream():
         mjpeg_stream_generator(),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
+
+
+@app.get("/api/sky/dvr/timeline")
+def get_dvr_timeline():
+    """Returns timeline metadata, buffer duration, and keyframe sample points for DVR playback."""
+    return dvr_manager.get_timeline()
+
+
+@app.get("/api/sky/dvr/frame")
+def get_dvr_frame(
+    timestamp: Optional[str] = None,
+    offset_sec: Optional[float] = None
+):
+    """
+    Retrieves a historical stitched frame from the DVR ring buffer or disk archive.
+    Accepts either an ISO timestamp string or a relative offset in seconds (e.g. -30 for 30s ago).
+    """
+    result = None
+    if offset_sec is not None:
+        result = dvr_manager.get_frame_by_offset(offset_sec)
+    elif timestamp:
+        try:
+            target_dt = datetime.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            result = dvr_manager.get_frame_by_timestamp(target_dt)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid timestamp format: {e}")
+    else:
+        # Default to latest frame in buffer
+        result = dvr_manager.get_frame_by_offset(0.0)
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="No DVR frame found for the requested time.")
+
+    jpeg_bytes, frame_dt = result
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    age_sec = max(0.0, (now_utc - frame_dt).total_seconds())
+    headers = {
+        "X-Frame-Timestamp": frame_dt.isoformat(),
+        "X-Frame-Age-Sec": str(round(age_sec, 2))
+    }
+    return Response(content=jpeg_bytes, media_type="image/jpeg", headers=headers)
+
 
 
 @app.post("/api/pipeline/capture_now")

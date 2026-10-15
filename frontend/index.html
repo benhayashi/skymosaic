@@ -146,11 +146,57 @@
 
           <div class="canvas-wrapper">
             <canvas id="sky-canvas" width="1200" height="1200"></canvas>
+
+            <!-- On-Canvas Zoom HUD Controls -->
+            <div class="canvas-zoom-hud">
+              <button type="button" id="btn-zoom-in" class="zoom-hud-btn" title="Zoom In (+)">+</button>
+              <button type="button" id="btn-zoom-out" class="zoom-hud-btn" title="Zoom Out (−)">−</button>
+              <button type="button" id="btn-zoom-reset" class="zoom-hud-btn" title="Reset Zoom & Pan (1:1)">⟲</button>
+              <span id="val-canvas-zoom" class="zoom-hud-badge" style="display: none;">1.0x</span>
+            </div>
+
             <div id="sky-loader" class="canvas-loader hidden">
               <div class="spinner"></div>
               <span>Stitching feeds...</span>
             </div>
           </div>
+
+          <!-- DVR Playback & Rewind Toolbar -->
+          <div class="dvr-toolbar">
+            <div class="dvr-left-controls">
+              <button type="button" id="dvr-live-badge" class="dvr-badge live" title="Click to jump to live real-time stream">
+                <span class="live-dot"></span> LIVE
+              </button>
+              <button type="button" id="btn-dvr-play-pause" class="dvr-btn dvr-play-btn" title="Pause / Play">⏸</button>
+              <button type="button" id="btn-dvr-rewind-30" class="dvr-btn" title="Rewind 30 seconds">⏪ 30s</button>
+              <button type="button" id="btn-dvr-rewind-10" class="dvr-btn" title="Rewind 10 seconds">⏪ 10s</button>
+              <button type="button" id="btn-dvr-forward-10" class="dvr-btn" title="Forward 10 seconds">⏩ 10s</button>
+            </div>
+
+            <div class="dvr-timeline-container">
+              <span id="dvr-start-time-label" class="dvr-time-label">-30m</span>
+              <div class="dvr-slider-track">
+                <input type="range" id="dvr-scrub-slider" min="-1800" max="0" step="1" value="0">
+              </div>
+              <span id="dvr-current-offset-text" class="dvr-offset-badge">LIVE</span>
+            </div>
+
+            <div class="dvr-right-controls">
+              <div class="dvr-speed-dropdown">
+                <button type="button" id="dvr-speed-btn" class="dvr-btn dvr-speed-btn" title="Playback speed">1x</button>
+                <div class="dvr-speed-menu">
+                  <button type="button" data-speed="0.5">0.5x</button>
+                  <button type="button" data-speed="1.0" class="active">1x</button>
+                  <button type="button" data-speed="2.0">2x</button>
+                  <button type="button" data-speed="4.0">4x</button>
+                </div>
+              </div>
+              <button type="button" id="btn-dvr-jump-live" class="dvr-btn btn-jump-live" title="Jump directly to live feed">
+                Go Live
+              </button>
+            </div>
+          </div>
+
 
           <div class="telemetry-bar">
             <div class="telemetry-item">
