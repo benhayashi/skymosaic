@@ -583,14 +583,31 @@ class SkyViewer {
         this.ctx.fill();
 
         let displayLabel = target.label;
+        let altText = '';
+        let distText = '';
+
         if (target.telemetry && target.telemetry.altitude_ft != null) {
           if (this.unitSystem === 'metric') {
             const altM = Math.round(target.telemetry.altitude_ft * 0.3048);
-            displayLabel = `${target.telemetry.flight || target.label} (${altM}m)`;
+            altText = `${altM}m`;
           } else {
-            displayLabel = `${target.telemetry.flight || target.label} (FL${Math.round(target.telemetry.altitude_ft / 100)})`;
+            altText = `FL${Math.round(target.telemetry.altitude_ft / 100)}`;
           }
         }
+
+        if (target.telemetry && target.telemetry.range_km != null) {
+          if (this.unitSystem === 'us') {
+            const mi = (target.telemetry.range_km * 0.621371).toFixed(1);
+            distText = `${mi}mi`;
+          } else {
+            distText = `${target.telemetry.range_km.toFixed(1)}km`;
+          }
+        }
+
+        const flightName = target.telemetry?.flight || target.label;
+        const details = [altText, distText].filter(Boolean).join(' • ');
+        displayLabel = details ? `${flightName} (${details})` : flightName;
+
         this.ctx.fillText(`✈ ${displayLabel}`, px + 14, py + 3);
       } else if (cat === 'satellite') {
         // Purple Diamond HUD

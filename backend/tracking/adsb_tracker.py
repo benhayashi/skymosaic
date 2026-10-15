@@ -1,5 +1,6 @@
 import datetime
 import math
+import struct
 import time
 from typing import Dict, List, Optional, Tuple
 import httpx
@@ -121,10 +122,111 @@ class SyntheticADSBGenerator:
         return self.flights
 
 
+def _read_varint(buf: bytes, pos: int) -> Tuple[int, int]:
+    res = 0
+    shift = 0
+    length = len(buf)
+    while pos < length:
+        b = buf[pos]
+        pos += 1
+        res |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    return res, pos
+
+
+def _parse_aircraft_meta(buf: bytes, pos: int, end: int) -> Dict:
+    ac: Dict = {}
+    while pos < end:
+        key, pos = _read_varint(buf, pos)
+        tag = key >> 3
+        wire = key & 7
+        if wire == 0:
+            val, pos = _read_varint(buf, pos)
+            # Handle signed 32-bit int if needed
+            val_signed = val - (1 << 32) if val >= (1 << 31) else val
+            if tag == 1:
+                ac['hex'] = hex(val)[2:].zfill(6)
+            elif tag == 3:
+                ac['squawk'] = f'{val:04o}' if val <= 0o7777 else str(val)
+            elif tag == 4:
+                ac['category'] = val
+            elif tag == 5:
+                ac['alt_baro'] = val_signed
+            elif tag == 20:
+                ac['alt_geom'] = val_signed
+            elif tag == 23:
+                ac['speed'] = val
+            elif tag == 27:
+                ac['track'] = val_signed
+        elif wire == 1:  # 64-bit float (double)
+            if pos + 8 <= end:
+                val = struct.unpack('<d', buf[pos:pos+8])[0]
+                pos += 8
+                if tag == 8:
+                    ac['lat'] = val
+                elif tag == 9:
+                    ac['lon'] = val
+            else:
+                break
+        elif wire == 2:  # Length-delimited string/message
+            length, pos = _read_varint(buf, pos)
+            if pos + length <= end:
+                val_bytes = buf[pos:pos+length]
+                pos += length
+                if tag == 2:
+                    ac['flight'] = val_bytes.decode('utf-8', errors='ignore').strip()
+            else:
+                break
+        elif wire == 5:  # 32-bit float
+            if pos + 4 <= end:
+                val = struct.unpack('<f', buf[pos:pos+4])[0]
+                pos += 4
+                if tag == 12:
+                    ac['rssi'] = val
+            else:
+                break
+        else:
+            break
+    return ac
+
+
+def decode_readsb_protobuf(pb_bytes: bytes) -> Dict:
+    """
+    Decodes readsb binary Protobuf stream (aircraft.pb) into dump1090-compatible dict.
+    Supports readsb v3+, mictronics/readsb, and sdr-enthusiasts docker containers.
+    """
+    pos = 0
+    length = len(pb_bytes)
+    aircraft_list = []
+    now_ts = 0
+
+    while pos < length:
+        key, pos = _read_varint(pb_bytes, pos)
+        tag = key >> 3
+        wire = key & 7
+        if wire == 0:
+            val, pos = _read_varint(pb_bytes, pos)
+            if tag == 1:
+                now_ts = val
+        elif wire == 2:
+            msg_len, pos = _read_varint(pb_bytes, pos)
+            if tag == 15:  # AircraftMeta
+                ac = _parse_aircraft_meta(pb_bytes, pos, pos + msg_len)
+                if ac.get('hex'):
+                    aircraft_list.append(ac)
+            pos += msg_len
+        else:
+            break
+    return {'now': now_ts, 'aircraft': aircraft_list}
+
+
 class ADSBTracker:
     """
     Ingests ADS-B transponder data from local dump1090/readsb receiver or simulation,
     computes topocentric Alt/Az coordinates, and correlates with optical sky targets.
+    Supports both JSON format (/data/aircraft.json) and Protobuf format (/data/aircraft.pb).
     """
 
     def __init__(self, adsb_cfg: ADSBConfig, obs_cfg: ObserverConfig):
@@ -139,82 +241,121 @@ class ADSBTracker:
         self.sim_gen.obs_lat = obs_cfg.latitude
         self.sim_gen.obs_lon = obs_cfg.longitude
 
+    def _get_candidate_urls(self, base_url: str) -> List[str]:
+        raw = base_url.strip()
+        if not raw:
+            return []
+
+        # If user explicitly passed an exact file path
+        if raw.endswith('.json') or raw.endswith('.pb'):
+            return [raw]
+
+        # Normalize host/base
+        base = raw.rstrip('/')
+        # If base is port 8080 on a local IP, check port 8081 first because readsb commonly runs on 8081
+        # when MeshMonitor, Pi-hole, or other web dashboards occupy port 8080
+        candidates = []
+        if ':8080' in base:
+            base_alt = base.replace(':8080', ':8081')
+            candidates.extend([
+                f"{base_alt}/data/aircraft.pb",
+                f"{base_alt}/data/aircraft.json",
+                f"{base_alt}/tar1090/data/aircraft.json"
+            ])
+
+        candidates.extend([
+            f"{base}/data/aircraft.json",
+            f"{base}/data/aircraft.pb",
+            f"{base}/aircraft.json",
+            f"{base}/tar1090/data/aircraft.json",
+            f"{base}/dump1090-fa/data/aircraft.json",
+            f"{base}/readsb/data/aircraft.json"
+        ])
+
+        return candidates
+
     def test_connection(self, test_url: Optional[str] = None) -> Dict:
-        """Tests live reachability of readsb/dump1090 aircraft.json endpoint."""
+        """Tests live reachability of readsb/dump1090 endpoint (JSON or Protobuf)."""
         target_url = test_url or self.config.url
         if not target_url:
             return {"reachable": False, "error": "Endpoint URL is empty."}
 
-        # Normalize URL: if user passed http://ip:port without path, append standard readsb path
-        url_to_test = target_url.strip()
-        if not url_to_test.endswith(".json") and not url_to_test.endswith("/"):
-            url_to_test += "/data/aircraft.json"
-        elif url_to_test.endswith("/"):
-            url_to_test += "data/aircraft.json"
+        candidates = self._get_candidate_urls(target_url)
 
-        try:
-            with httpx.Client(timeout=3.0) as client:
-                resp = client.get(url_to_test)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    aircraft = data.get("aircraft", [])
-                    return {
-                        "reachable": True,
-                        "url_tested": url_to_test,
-                        "aircraft_count": len(aircraft),
-                        "now": data.get("now"),
-                        "total_tracked": data.get("total", len(aircraft)),
-                        "version": data.get("version", "readsb/dump1090 compatible")
-                    }
-                else:
-                    error_msg = f"Server responded with HTTP {resp.status_code}"
-                    if resp.status_code == 404:
-                        # Probe if the receiver is running in protobuf-only mode (readsb default)
-                        pb_url = url_to_test.replace("/data/aircraft.json", "/data/aircraft.pb")
-                        try:
-                            pb_resp = client.get(pb_url)
-                            if pb_resp.status_code == 200:
-                                error_msg = (
-                                    "readsb receiver found, but it is running in Protobuf-only mode (aircraft.pb active, aircraft.json missing). "
-                                    "To enable JSON output in Docker Compose, add to your environment: "
-                                    "- READSB_EXTRA_ARGS=--write-json /run/readsb "
-                                    "(or mount a tmpfs on /run/readsb)."
-                                )
-                        except Exception:
-                            pass
-                    return {
-                        "reachable": False,
-                        "url_tested": url_to_test,
-                        "status_code": resp.status_code,
-                        "error": error_msg
-                    }
-        except Exception as e:
-            return {
-                "reachable": False,
-                "url_tested": url_to_test,
-                "error": str(e)
-            }
+        with httpx.Client(timeout=3.0, follow_redirects=True) as client:
+            last_err = "No endpoints responded"
+            for url in candidates:
+                try:
+                    resp = client.get(url)
+                    if resp.status_code == 200:
+                        content_type = resp.headers.get("content-type", "").lower()
+                        # 1. JSON endpoint
+                        if "json" in content_type or url.endswith(".json"):
+                            try:
+                                data = resp.json()
+                                aircraft = data.get("aircraft", [])
+                                return {
+                                    "reachable": True,
+                                    "url_tested": url,
+                                    "aircraft_count": len(aircraft),
+                                    "now": data.get("now"),
+                                    "total_tracked": data.get("total", len(aircraft)),
+                                    "version": data.get("version", "readsb/dump1090 JSON")
+                                }
+                            except Exception:
+                                pass
+
+                        # 2. Protobuf endpoint
+                        if "protobuf" in content_type or url.endswith(".pb") or len(resp.content) > 10:
+                            try:
+                                pb_data = decode_readsb_protobuf(resp.content)
+                                aircraft = pb_data.get("aircraft", [])
+                                if len(aircraft) > 0 or len(resp.content) > 20:
+                                    return {
+                                        "reachable": True,
+                                        "url_tested": url,
+                                        "aircraft_count": len(aircraft),
+                                        "now": pb_data.get("now"),
+                                        "total_tracked": len(aircraft),
+                                        "version": "readsb Protobuf (Native ultra-low latency)"
+                                    }
+                            except Exception as pe:
+                                last_err = f"Protobuf decode error on {url}: {pe}"
+                    else:
+                        last_err = f"HTTP {resp.status_code} at {url}"
+                except Exception as e:
+                    last_err = str(e)
+
+        return {
+            "reachable": False,
+            "url_tested": target_url,
+            "error": f"Failed to reach readsb/dump1090 on {target_url}. (Probed: {candidates[0] if candidates else 'N/A'}; Result: {last_err})"
+        }
 
     def poll_aircraft(self) -> List[Dict]:
         """Fetches aircraft and converts them to Topocentric Alt/Az coordinates."""
         raw_aircraft = []
 
         if not self.config.use_simulation and self.config.url:
-            url = self.config.url.strip()
-            if not url.endswith(".json") and not url.endswith("/"):
-                url += "/data/aircraft.json"
-            elif url.endswith("/"):
-                url += "data/aircraft.json"
-
-            try:
-                with httpx.Client(timeout=2.0) as client:
-                    resp = client.get(url)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        raw_aircraft = data.get("aircraft", [])
-            except Exception:
-                # Fall back to simulation if local feed unavailable
-                pass
+            candidates = self._get_candidate_urls(self.config.url)
+            with httpx.Client(timeout=2.0, follow_redirects=True) as client:
+                for url in candidates:
+                    try:
+                        resp = client.get(url)
+                        if resp.status_code == 200:
+                            content_type = resp.headers.get("content-type", "").lower()
+                            if "protobuf" in content_type or url.endswith(".pb"):
+                                pb_data = decode_readsb_protobuf(resp.content)
+                                raw_aircraft = pb_data.get("aircraft", [])
+                                if raw_aircraft:
+                                    break
+                            else:
+                                data = resp.json()
+                                raw_aircraft = data.get("aircraft", [])
+                                if raw_aircraft:
+                                    break
+                    except Exception:
+                        continue
 
         if not raw_aircraft:
             raw_aircraft = self.sim_gen.update_positions()

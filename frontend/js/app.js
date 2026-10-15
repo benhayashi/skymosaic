@@ -59,6 +59,9 @@ function initUnitSystem() {
     const elevLabel = document.getElementById('label-elevation-unit');
     if (elevLabel) elevLabel.textContent = unit === 'metric' ? 'meters' : 'feet';
 
+    const adsbRangeLabel = document.getElementById('label-adsb-range-unit');
+    if (adsbRangeLabel) adsbRangeLabel.textContent = unit === 'metric' ? 'km' : 'miles';
+
     if (skyViewer) {
       skyViewer.setUnitSystem(unit);
     }
@@ -938,7 +941,7 @@ function updateTargetsList(targets) {
       extraInfo += ` | ${formatSpeed(t.speed_kts)}`;
     }
     if (t.telemetry && t.telemetry.range_km != null) {
-      extraInfo += ` | Dist: ${formatRange(t.telemetry.range_km)}`;
+      extraInfo += ` | Range: ${formatRange(t.telemetry.range_km)}`;
     }
     if (t.speed_deg_s > 0) {
       extraInfo += ` | ${t.speed_deg_s}°/s`;
