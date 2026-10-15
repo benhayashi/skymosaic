@@ -265,6 +265,7 @@ function renderCamerasList() {
           <div>Lens: ${cam.intrinsics.lens_model} (${cam.intrinsics.fov_deg}° FOV)</div>
         </div>
         <div class="camera-actions">
+          <button class="btn btn-primary btn-sm" style="background:linear-gradient(135deg, #2563eb, #7c3aed);" onclick="quickAutoCalibrateCamera('${cam.id}')">✨ Auto-Solve</button>
           <button class="btn btn-secondary btn-sm" onclick="openCalibrationFor('${cam.id}')">Calibrate</button>
           <button class="btn btn-outline btn-sm" style="color:var(--accent-danger);" onclick="deleteCameraFeed('${cam.id}')">Delete</button>
         </div>
@@ -273,6 +274,31 @@ function renderCamerasList() {
     container.appendChild(card);
   });
 }
+
+window.quickAutoCalibrateCamera = async function(cameraId) {
+  const target = camerasList.find(c => c.config.id === cameraId);
+  const name = target ? target.config.name : cameraId;
+  showToast(`Starting auto-plate solve for ${name}...`, 'info');
+  try {
+    const res = await fetch('/api/calibration/auto_solve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ camera_id: cameraId, apply_to_camera: true, force: true })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      const errMsg = data.message || data.error || (data.results && data.results[cameraId]?.error) || "Auto-calibration failed.";
+      showToast(`Auto-solve failed: ${errMsg}`, 'error');
+      return;
+    }
+    const camRes = (data.results && data.results[cameraId]) ? data.results[cameraId] : data;
+    showToast(`✓ Auto-calibrated ${name}! Az: ${camRes.azimuth_deg}°, Alt: ${camRes.altitude_deg}°, RMS: ${camRes.rms_error_px}px (${camRes.match_count || camRes.matched_stars?.length} stars)`, 'success');
+    await loadCameras();
+    skyViewer.render();
+  } catch (e) {
+    showToast(`Network error auto-calibrating: ${e.message}`, 'error');
+  }
+};
 
 function populateCalibrationCameraSelect() {
   const sel = document.getElementById('calib-camera-select');
@@ -411,6 +437,10 @@ function initCalibrationEvents() {
     if (sol && sol.success) {
       showToast(`Pose solved! RMS Error: ${sol.rms_error_px} px`, 'success');
     }
+  });
+
+  document.getElementById('btn-calib-auto-solve')?.addEventListener('click', async () => {
+    await calibrationStudio.autoPlateSolve();
   });
 
   // Mask drawing
@@ -932,9 +962,50 @@ function populateSettingsForm() {
     if (cbToolbar) cbToolbar.checked = appConfig.stitching.overlay_timestamp !== false;
   }
 
+  const autoCalib = appConfig.plugins?.auto_calibration || appConfig.ai_plugins?.auto_calibration;
+  if (autoCalib) {
+    document.getElementById('set-autocalib-enabled').checked = !!autoCalib.enabled;
+    document.getElementById('set-autocalib-interval').value = autoCalib.check_interval_minutes ?? 60;
+    document.getElementById('set-autocalib-require-night').checked = autoCalib.require_night !== false;
+    document.getElementById('set-autocalib-min-stars').value = autoCalib.min_star_matches ?? 3;
+    document.getElementById('set-autocalib-max-rms').value = autoCalib.max_rms_error_px ?? 8.0;
+  }
+
   fetchStorageStatus();
   fetchADSBStatus();
   fetchNTPStatus();
+  fetchAutoCalibStatus();
+}
+
+async function fetchAutoCalibStatus() {
+  const badge = document.getElementById('autocalib-status-badge');
+  const details = document.getElementById('autocalib-status-details');
+  if (!badge) return;
+
+  try {
+    const res = await fetch('/api/calibration/auto_status');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.enabled) {
+        badge.textContent = `Auto-Calibration Active (Every ${data.check_interval_minutes}m)`;
+        badge.style.color = 'var(--accent-success)';
+        badge.style.borderColor = 'var(--accent-success)';
+      } else {
+        badge.textContent = 'Auto-Calibration Disabled';
+        badge.style.color = 'var(--text-dim)';
+        badge.style.borderColor = 'var(--border-color)';
+      }
+
+      if (details) {
+        let msg = `Status: <strong>${data.status}</strong> | Last Check: ${data.last_run ? new Date(data.last_run).toLocaleString() : 'Never'}`;
+        if (data.message) msg += `<br><span style="color:var(--text-secondary);">${data.message}</span>`;
+        details.innerHTML = msg;
+      }
+    }
+  } catch (_) {
+    badge.textContent = 'Auto-Calibrator Offline';
+    badge.style.color = 'var(--text-dim)';
+  }
 }
 
 async function fetchNTPStatus() {
@@ -1128,6 +1199,14 @@ function initSettingsEvents() {
     appConfig.stitching.ntp_enabled = document.getElementById('set-ntp-enabled').checked;
     appConfig.stitching.ntp_server = document.getElementById('set-ntp-server').value.trim() || 'pool.ntp.org';
 
+    if (!appConfig.plugins) appConfig.plugins = {};
+    if (!appConfig.plugins.auto_calibration) appConfig.plugins.auto_calibration = {};
+    appConfig.plugins.auto_calibration.enabled = document.getElementById('set-autocalib-enabled').checked;
+    appConfig.plugins.auto_calibration.check_interval_minutes = parseInt(document.getElementById('set-autocalib-interval').value) || 60;
+    appConfig.plugins.auto_calibration.require_night = document.getElementById('set-autocalib-require-night').checked;
+    appConfig.plugins.auto_calibration.min_star_matches = parseInt(document.getElementById('set-autocalib-min-stars').value) || 3;
+    appConfig.plugins.auto_calibration.max_rms_error_px = parseFloat(document.getElementById('set-autocalib-max-rms').value) || 8.0;
+
     try {
       const res = await fetch('/api/config', {
         method: 'POST',
@@ -1141,9 +1220,44 @@ function initSettingsEvents() {
         fetchStorageStatus();
         fetchADSBStatus();
         fetchNTPStatus();
+        fetchAutoCalibStatus();
       }
     } catch (e) {
       showToast('Failed to save settings', 'error');
+    }
+  });
+
+  document.getElementById('btn-trigger-autocalib-now')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-trigger-autocalib-now');
+    const origText = btn ? btn.textContent : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Solving Cameras...';
+    }
+    showToast('Executing full sky plate solving across active cameras...', 'info');
+
+    try {
+      const res = await fetch('/api/calibration/auto_solve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apply_to_camera: true, force: true })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`✓ ${data.message}`, 'success');
+        await loadCameras();
+        skyViewer.render();
+      } else {
+        showToast(data.message || 'Auto-calibration failed', 'error');
+      }
+      fetchAutoCalibStatus();
+    } catch (e) {
+      showToast(`Error running auto-calibration: ${e.message}`, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = origText;
+      }
     }
   });
 

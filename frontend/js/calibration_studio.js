@@ -442,4 +442,80 @@ class CalibrationStudio {
       alert(`Optimization error: ${e.message}`);
     }
   }
+
+  async autoPlateSolve() {
+    if (!this.activeCamera) {
+      alert("Please select a target camera first.");
+      return;
+    }
+
+    const btn = document.getElementById('btn-calib-auto-solve');
+    const origText = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '✨ Plate Solving...';
+    }
+
+    try {
+      const timeVal = document.getElementById('calib-time-input')?.value;
+      const payload = {
+        camera_id: this.activeCamera.id,
+        apply_to_camera: true,
+        force: true,
+        timestamp_iso: timeVal ? new Date(timeVal).toISOString() : null
+      };
+
+      const res = await fetch('/api/calibration/auto_solve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        const errMsg = data.message || data.error || (data.results && data.results[this.activeCamera.id]?.error) || "Plate solving could not find a confident solution.";
+        throw new Error(errMsg);
+      }
+
+      const camRes = (data.results && data.results[this.activeCamera.id]) ? data.results[this.activeCamera.id] : data;
+      this.azimuth = camRes.azimuth_deg;
+      this.altitude = camRes.altitude_deg;
+      this.roll = camRes.roll_deg;
+      this.fov = camRes.fov_deg;
+
+      if (camRes.matched_stars && camRes.matched_stars.length > 0) {
+        this.starMatches = camRes.matched_stars.map(m => ({
+          pixel_x: m.pixel_x,
+          pixel_y: m.pixel_y,
+          star_id: m.star_id
+        }));
+        this.renderMatchesTable();
+      }
+
+      this.updateControlsUI();
+      this.render();
+
+      if (window.showToast) {
+        showToast(`Auto-calibrated: Az ${this.azimuth}°, Alt ${this.altitude}°, RMS ${camRes.rms_error_px}px (${camRes.match_count || camRes.matched_stars?.length} stars)`, 'success');
+      } else {
+        alert(`Camera pose auto-solved!\nAzimuth: ${this.azimuth}°\nAltitude: ${this.altitude}°\nRoll: ${this.roll}°\nFOV: ${this.fov}°\nRMS Error: ${camRes.rms_error_px} px`);
+      }
+
+      if (window.loadCameras) {
+        await window.loadCameras();
+      }
+      return camRes;
+    } catch (e) {
+      if (window.showToast) {
+        showToast(`Auto-solve failed: ${e.message}`, 'error');
+      } else {
+        alert(`Auto-solve failed: ${e.message}`);
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+    }
+  }
 }

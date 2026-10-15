@@ -107,10 +107,21 @@ class TrackingConfig(BaseModel):
     uap_auto_record: bool = Field(default=True, description="Automatically record and archive unclassified / anomalous sky events")
 
 
+class AutoCalibrationConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Enable automatic nightly background plate-solving calibration")
+    check_interval_minutes: int = Field(default=60, description="Check interval in minutes for background auto-calibration")
+    max_cloud_cover_percent: float = Field(default=20.0, description="Maximum allowed cloud cover to trigger auto-calibration")
+    min_star_matches: int = Field(default=3, description="Minimum star matches required to accept a solved pose")
+    max_rms_error_px: float = Field(default=8.0, description="Maximum allowable RMS pixel error to apply auto-calibration")
+    require_night: bool = Field(default=True, description="Only perform auto-calibration during astronomical night")
+
+
 class AIPluginsConfig(BaseModel):
     weather_enabled: bool = Field(default=True, description="Enable automated sky condition and cloud cover vision estimator")
     daytime_detector_enabled: bool = Field(default=True, description="Enable daytime object detection (birds, drones, planes)")
     meteor_detector_enabled: bool = Field(default=True, description="Enable fast transient meteor and fireball streak detector")
+    auto_calibration: AutoCalibrationConfig = Field(default_factory=AutoCalibrationConfig)
+
 
 
 class StorageConfig(BaseModel):
@@ -149,6 +160,9 @@ class SkyViewConfig(BaseModel):
     plugins: AIPluginsConfig = Field(default_factory=AIPluginsConfig)
     data_dir: str = Field(default="data", description="Directory for storing test shots, masks, archives, and outputs")
 
+    @property
+    def ai_plugins(self) -> AIPluginsConfig:
+        return self.plugins
 
 
 def get_default_config() -> SkyViewConfig:

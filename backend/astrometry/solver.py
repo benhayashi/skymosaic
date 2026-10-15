@@ -120,42 +120,54 @@ def solve_camera_pose_from_matches(
     init_fov_val = init_fov if init_fov else 85.0
 
     x0 = [init_az, init_alt, init_roll, init_fov_val]
-    bounds = [
-        (0.0, 360.0),    # Azimuth
-        (-10.0, 90.0),   # Altitude
-        (-180.0, 180.0), # Roll
-        (20.0, 220.0),   # FOV
-    ]
+    lower_bounds = [0.0, -10.0, -180.0, 20.0]
+    upper_bounds = [360.0, 90.0, 180.0, 220.0]
 
-    def objective(params):
+    def residual_vector(params):
         az_val, alt_val, roll_val, fov_val = params
         ext = CameraExtrinsics(azimuth_deg=az_val % 360.0, altitude_deg=alt_val, roll_deg=roll_val % 360.0)
         intr = CameraIntrinsics(lens_model=lens_model, fov_deg=fov_val)
         R_w2c = build_camera_rotation_matrix(ext)
 
-        total_err_sq = 0.0
+        resids = []
         for v, (tx, ty) in zip(world_vectors, target_pixels):
             proj = project_world_point_to_camera(v, R_w2c, intr, img_w, img_h)
             if proj is None:
-                return 1e6
+                resids.extend([500.0, 500.0])
             else:
-                px, py = proj
-                total_err_sq += (px - tx) ** 2 + (py - ty) ** 2
+                resids.extend([proj[0] - tx, proj[1] - ty])
+        return resids
 
-        return math.sqrt(total_err_sq / len(world_vectors))
+    try:
+        from scipy.optimize import least_squares
+        ls_res = least_squares(
+            residual_vector,
+            x0,
+            bounds=(lower_bounds, upper_bounds),
+            diff_step=1e-3,
+            ftol=1e-8,
+            xtol=1e-8,
+            gtol=1e-8
+        )
+        opt_az, opt_alt, opt_roll, opt_fov = ls_res.x
+        is_success = bool(ls_res.success)
+    except Exception:
+        def objective(params):
+            r = residual_vector(params)
+            return math.sqrt(sum(x * x for x in r) / len(world_vectors))
 
-    res = minimize(objective, x0, method="Powell", bounds=bounds, options={"maxiter": 2000, "xtol": 1e-4})
-    if not res.success or res.fun > 50.0:
-        # Fallback Nelder-Mead
-        res_nm = minimize(objective, x0, method="Nelder-Mead", bounds=bounds, options={"maxiter": 1000})
-        if res_nm.fun < res.fun:
-            res = res_nm
+        bounds_tuples = list(zip(lower_bounds, upper_bounds))
+        res = minimize(objective, x0, method="Powell", bounds=bounds_tuples, options={"maxiter": 2000, "xtol": 1e-4})
+        opt_az, opt_alt, opt_roll, opt_fov = res.x
+        is_success = bool(res.success)
 
-
-    opt_az, opt_alt, opt_roll, opt_fov = res.x
     opt_az = float(opt_az % 360.0)
     opt_alt = float(max(-10.0, min(90.0, opt_alt)))
-    opt_roll = float(opt_roll % 360.0)
+    opt_roll = float(opt_roll)
+    while opt_roll > 180.0:
+        opt_roll -= 360.0
+    while opt_roll < -180.0:
+        opt_roll += 360.0
     opt_fov = float(opt_fov)
 
     # Compute final reprojections
@@ -192,7 +204,7 @@ def solve_camera_pose_from_matches(
     rms_error = math.sqrt(total_sq / len(reprojections)) if reprojections else 999.0
 
     return {
-        "success": bool(res.success or rms_error < 15.0),
+        "success": bool(is_success or rms_error < 15.0),
         "azimuth_deg": round(opt_az, 2),
         "altitude_deg": round(opt_alt, 2),
         "roll_deg": round(opt_roll, 2),
@@ -200,3 +212,156 @@ def solve_camera_pose_from_matches(
         "rms_error_px": round(rms_error, 2),
         "reprojections": reprojections
     }
+
+
+def auto_plate_solve_camera(
+    image: np.ndarray,
+    dt: datetime.datetime,
+    lat_deg: float,
+    lon_deg: float,
+    lens_model: LensModelType = LensModelType.RECTILINEAR,
+    init_extrinsics: Optional[CameraExtrinsics] = None,
+    init_fov: Optional[float] = None,
+    max_search_dist_px: float = 80.0
+) -> Dict:
+    """
+    Autonomous Star Plate Solver:
+    1. Detects star centroids on camera frame.
+    2. Projects visible catalogue stars using observer lat/lon, NTP datetime, and estimated/prior pose.
+    3. Solves optimal assignment (Hungarian / nearest mutual distance) between detected centroids and catalog stars.
+    4. Runs non-linear optimization to solve refined Azimuth, Altitude, Roll, and FOV.
+    """
+    h, w = image.shape[:2]
+    detected_stars = detect_star_centroids(image, min_area=2, max_stars=35)
+    if len(detected_stars) < 2:
+        return {
+            "success": False,
+            "error": f"Insufficient stars detected on sensor ({len(detected_stars)} found, minimum 2 required)."
+        }
+
+    # 1. Project candidate catalog stars using initial prior pose
+    est_az = init_extrinsics.azimuth_deg if init_extrinsics else 0.0
+    est_alt = init_extrinsics.altitude_deg if init_extrinsics else 45.0
+    est_roll = init_extrinsics.roll_deg if init_extrinsics else 0.0
+    est_fov = init_fov if init_fov else 85.0
+
+    ext_prior = CameraExtrinsics(azimuth_deg=est_az, altitude_deg=est_alt, roll_deg=est_roll)
+    intr_prior = CameraIntrinsics(lens_model=lens_model, fov_deg=est_fov)
+    R_w2c_prior = build_camera_rotation_matrix(ext_prior)
+
+    lst_deg = get_lst_deg(dt, lon_deg)
+    catalog_projections = []
+
+    for star in BRIGHT_STARS:
+        alt, az = radec_to_altaz(star["ra"], star["dec"], lat_deg, lst_deg)
+        if alt < -2.0:
+            continue
+        v_world = altaz_to_unit_vector(alt, az)
+        proj = project_world_point_to_camera(v_world, R_w2c_prior, intr_prior, w, h)
+        if proj is not None:
+            px, py = proj
+            # Keep stars inside or near sensor boundary
+            if -40 <= px <= w + 40 and -40 <= py <= h + 40:
+                catalog_projections.append({
+                    "star_id": star["id"],
+                    "name": star["name"],
+                    "mag": star["mag"],
+                    "proj_x": px,
+                    "proj_y": py
+                })
+
+    if len(catalog_projections) < 2:
+        return {
+            "success": False,
+            "error": f"Fewer than 2 catalog reference stars fall in the camera's FOV (found {len(catalog_projections)})."
+        }
+
+    # 2. Greedy mutual nearest-neighbor matching
+    matched_pairs = []
+    used_det_indices = set()
+    used_cat_ids = set()
+
+    # Sort catalog projections by brightness (ascending magnitude)
+    catalog_projections.sort(key=lambda s: s["mag"])
+
+    for cat_star in catalog_projections:
+        best_dist = float("inf")
+        best_det_idx = -1
+        cx, cy = cat_star["proj_x"], cat_star["proj_y"]
+
+        for i, det in enumerate(detected_stars):
+            if i in used_det_indices:
+                continue
+            dx = det["x"] - cx
+            dy = det["y"] - cy
+            dist = math.hypot(dx, dy)
+            if dist < best_dist and dist <= max_search_dist_px:
+                best_dist = dist
+                best_det_idx = i
+
+        if best_det_idx >= 0:
+            used_det_indices.add(best_det_idx)
+            used_cat_ids.add(cat_star["star_id"])
+            det = detected_stars[best_det_idx]
+            matched_pairs.append({
+                "star_id": cat_star["star_id"],
+                "star_name": cat_star["name"],
+                "pixel_x": det["x"],
+                "pixel_y": det["y"],
+                "distance_px": round(best_dist, 2)
+            })
+
+    if len(matched_pairs) < 2:
+        return {
+            "success": False,
+            "error": f"Could not correlate enough star patterns (only {len(matched_pairs)} matched)."
+        }
+
+    # 3. Solve refined camera pose using matched anchors
+    sol = solve_camera_pose_from_matches(
+        matches=matched_pairs,
+        dt=dt,
+        lat_deg=lat_deg,
+        lon_deg=lon_deg,
+        img_w=w,
+        img_h=h,
+        lens_model=lens_model,
+        init_extrinsics=ext_prior,
+        init_fov=est_fov
+    )
+
+    # 4. Outlier pruning (trim misidentified edge peaks or distortion outliers)
+    if len(matched_pairs) >= 4 and sol.get("reprojections"):
+        errs = [r["error_px"] for r in sol["reprojections"] if r.get("error_px") is not None]
+        if errs:
+            med_err = float(np.median(errs))
+            thresh = max(14.0, med_err * 2.2)
+            inliers = [
+                m for m, r in zip(matched_pairs, sol["reprojections"])
+                if r.get("error_px", 999.0) <= thresh
+            ]
+            if len(inliers) >= 3 and len(inliers) < len(matched_pairs):
+                ref_ext = CameraExtrinsics(
+                    azimuth_deg=sol["azimuth_deg"],
+                    altitude_deg=sol["altitude_deg"],
+                    roll_deg=sol["roll_deg"]
+                )
+                refined_sol = solve_camera_pose_from_matches(
+                    matches=inliers,
+                    dt=dt,
+                    lat_deg=lat_deg,
+                    lon_deg=lon_deg,
+                    img_w=w,
+                    img_h=h,
+                    lens_model=lens_model,
+                    init_extrinsics=ref_ext,
+                    init_fov=sol["fov_deg"]
+                )
+                if refined_sol.get("rms_error_px", 999.0) < sol.get("rms_error_px", 999.0):
+                    sol = refined_sol
+                    matched_pairs = inliers
+
+    sol["matched_stars"] = matched_pairs
+    sol["match_count"] = len(matched_pairs)
+    return sol
+

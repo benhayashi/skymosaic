@@ -32,6 +32,7 @@ from backend.config import OperatingMode
 from backend.pipeline.media_generator import MediaGenerator
 from backend.pipeline.storage_manager import StorageManager
 from backend.stitching.stitcher import MultiCameraStitcher
+from backend.astrometry.auto_calibrator import AutoCalibrationManager
 from backend.tracking.optical_tracker import OpticalTrackerEngine
 
 
@@ -43,6 +44,23 @@ stitcher = MultiCameraStitcher(app_config)
 tracker_engine = OpticalTrackerEngine(app_config)
 storage_manager = StorageManager(app_config)
 storage_manager.start()
+
+
+def apply_config_changes(new_config: SkyViewConfig):
+    global app_config
+    app_config = new_config
+    save_config(app_config, CONFIG_PATH)
+    stream_manager.update_config(app_config)
+    stitcher.update_config(app_config)
+    tracker_engine.update_config(app_config)
+    auto_calibrator.update_config(app_config)
+    storage_manager.update_config(app_config)
+
+
+auto_calibrator = AutoCalibrationManager(
+    app_config, stream_manager, stitcher, on_calibration_applied=apply_config_changes
+)
+auto_calibrator.start()
 
 app = FastAPI(title="SkyMosaic: Multi-Camera AllSky System", version="1.0.0")
 
@@ -65,6 +83,13 @@ class SolveCalibrationRequest(BaseModel):
     init_fov: Optional[float] = None
     img_width: int = 1280
     img_height: int = 720
+
+
+class AutoSolveRequest(BaseModel):
+    camera_id: Optional[str] = None
+    apply_to_camera: bool = True
+    force: bool = True
+    timestamp_iso: Optional[str] = None
 
 
 class StarDetectionRequest(BaseModel):
@@ -93,13 +118,7 @@ def get_config():
 
 @app.post("/api/config")
 def update_config(new_config: SkyViewConfig):
-    global app_config
-    app_config = new_config
-    save_config(app_config, CONFIG_PATH)
-    stream_manager.update_config(app_config)
-    stitcher.update_config(app_config)
-    tracker_engine.update_config(app_config)
-    storage_manager.update_config(app_config)
+    apply_config_changes(new_config)
     return {"status": "ok", "message": "Configuration updated successfully."}
 
 
@@ -343,6 +362,29 @@ def solve_calibration_endpoint(req: SolveCalibrationRequest):
         return solution
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/calibration/auto_solve")
+def auto_solve_calibration_endpoint(req: AutoSolveRequest):
+    """
+    Autonomous Star Plate Solving endpoint:
+    Detects star centroids on camera frame, matches them with catalog stars via observer lat/lon & NTP time,
+    and calculates refined Azimuth, Altitude, Roll, and FOV.
+    Optionally applies new extrinsics directly to camera and active stitcher.
+    """
+    res = auto_calibrator.run_auto_calibration(
+        camera_id=req.camera_id,
+        force=req.force,
+        apply_updates=req.apply_to_camera,
+        timestamp_iso=req.timestamp_iso
+    )
+    return res
+
+
+@app.get("/api/calibration/auto_status")
+def get_auto_calibration_status():
+    """Returns background auto-calibration configuration, scheduling, and last-run history."""
+    return auto_calibrator.get_status()
 
 
 @app.get("/api/sky/live.jpg")

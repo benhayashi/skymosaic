@@ -317,6 +317,14 @@
             <div id="star-matches-list" class="matches-table-container">
               <!-- Matched star rows -->
             </div>
+            <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+              <button id="btn-calib-auto-solve" class="btn btn-primary btn-block" style="background: linear-gradient(135deg, #2563eb, #7c3aed); font-weight: 600;">
+                ✨ Auto-Plate Solve (Zero Clicks)
+              </button>
+              <p class="card-caption" style="margin-top: 6px; font-size: 0.8rem; line-height: 1.3;">
+                Autonomous plate solving using GPS coordinates, NTP time, star peak extraction, and Levenberg-Marquardt catalogue optimization.
+              </p>
+            </div>
           </div>
 
           <div class="card">
@@ -698,6 +706,58 @@
           </div>
 
           <div id="adsb-test-result" style="margin-top:12px;font-size:0.85rem;color:var(--text-dim);"></div>
+        </div>
+
+        <div class="card settings-card">
+          <div class="section-title-row">
+            <h2>✨ Autonomous Nightly Plate Solving & Auto-Calibration</h2>
+            <div id="autocalib-status-badge" class="badge-pill" style="background:var(--bg-surface-elevated);border:1px solid var(--border-color);">Checking...</div>
+          </div>
+          <p class="card-caption">
+            Automatically detects star centroids on live camera frames at night and performs Levenberg-Marquardt non-linear plate solving against the celestial star catalog. Constantly corrects for mount drift, temperature shifts, and physical settling without any manual intervention.
+          </p>
+
+          <div class="form-row">
+            <div class="form-group col-4">
+              <label>Nightly Auto-Calibration</label>
+              <div style="display:flex;align-items:center;height:38px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="set-autocalib-enabled"> Enable Background Auto-Calibration
+                </label>
+              </div>
+            </div>
+            <div class="form-group col-4">
+              <label for="set-autocalib-interval">Check Interval (Minutes)</label>
+              <input type="number" id="set-autocalib-interval" min="5" max="1440" class="form-control" value="60">
+              <small style="color:var(--text-dim);font-size:0.75rem;">How frequently to verify star alignment.</small>
+            </div>
+            <div class="form-group col-4">
+              <label>Astronomical Night Only</label>
+              <div style="display:flex;align-items:center;height:38px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="set-autocalib-require-night" checked> Only Run When Dark (Sun &le; -12°)
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-4">
+              <label for="set-autocalib-min-stars">Min Matched Stars</label>
+              <input type="number" id="set-autocalib-min-stars" min="2" max="20" class="form-control" value="3">
+              <small style="color:var(--text-dim);font-size:0.75rem;">Minimum stars required to accept pose solution.</small>
+            </div>
+            <div class="form-group col-4">
+              <label for="set-autocalib-max-rms">Max RMS Error (Pixels)</label>
+              <input type="number" id="set-autocalib-max-rms" min="1.0" max="30.0" step="0.5" class="form-control" value="8.0">
+              <small style="color:var(--text-dim);font-size:0.75rem;">Rejects solutions exceeding this pixel deviation.</small>
+            </div>
+            <div class="form-group col-4" style="display:flex;align-items:flex-end;">
+              <button type="button" id="btn-trigger-autocalib-now" class="btn btn-secondary" style="width:100%;">Run Auto-Calibration Now</button>
+            </div>
+          </div>
+
+          <div id="autocalib-status-details" style="margin-top:12px;font-size:0.85rem;color:var(--text-dim);font-family:var(--font-mono);"></div>
         </div>
 
         <button id="btn-save-all-settings" class="btn btn-primary btn-lg">

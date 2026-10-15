@@ -140,9 +140,8 @@ class CameraStreamHandler:
 
     def stop(self) -> None:
         self._running = False
-        if self._cap:
-            self._cap.release()
-            self._cap = None
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
 
     def _open_stream(self) -> bool:
         if self.camera_cfg.source_type == CameraSourceType.RTSP:
@@ -161,55 +160,61 @@ class CameraStreamHandler:
         return True
 
     def _capture_loop(self) -> None:
-        while self._running:
-            try:
-                if self.camera_cfg.source_type == CameraSourceType.SYNTHETIC:
-                    sim_frame = self._synthetic_sim.render_frame()
-                    with self._lock:
-                        self.latest_frame = sim_frame
-                    time.sleep(0.1)  # ~10 FPS for simulation
-
-                elif self.camera_cfg.source_type == CameraSourceType.DIRECTORY:
-                    folder = Path(self.camera_cfg.url_or_path)
-                    if folder.is_dir():
-                        # Find newest image
-                        exts = ("*.jpg", "*.jpeg", "*.png", "*.tiff", "*.fits")
-                        files = []
-                        for ext in exts:
-                            files.extend(folder.glob(ext))
-                        if files:
-                            latest_file = max(files, key=lambda f: f.stat().st_mtime)
-                            img = cv2.imread(str(latest_file))
-                            if img is not None:
-                                with self._lock:
-                                    self.latest_frame = img
-                    time.sleep(1.0)
-
-                elif self.camera_cfg.source_type in (CameraSourceType.RTSP, CameraSourceType.USB):
-                    if self._cap is None or not self._cap.isOpened():
-                        if not self._open_stream():
-                            time.sleep(3.0)
-                            continue
-
-                    ret, frame = self._cap.read()
-                    if ret and frame is not None:
+        try:
+            while self._running:
+                try:
+                    if self.camera_cfg.source_type == CameraSourceType.SYNTHETIC:
+                        sim_frame = self._synthetic_sim.render_frame()
                         with self._lock:
-                            self.latest_frame = frame
-                    else:
-                        time.sleep(1.0)
-                        if self._cap:
-                            self._cap.release()
-                            self._cap = None
+                            self.latest_frame = sim_frame
+                        time.sleep(0.1)  # ~10 FPS for simulation
 
-            except Exception as e:
-                print(f"Error capturing from camera {self.camera_cfg.id}: {e}")
-                time.sleep(2.0)
+                    elif self.camera_cfg.source_type == CameraSourceType.DIRECTORY:
+                        folder = Path(self.camera_cfg.url_or_path)
+                        if folder.is_dir():
+                            exts = ("*.jpg", "*.jpeg", "*.png", "*.tiff", "*.fits")
+                            files = []
+                            for ext in exts:
+                                files.extend(folder.glob(ext))
+                            if files:
+                                latest_file = max(files, key=lambda f: f.stat().st_mtime)
+                                img = cv2.imread(str(latest_file))
+                                if img is not None:
+                                    with self._lock:
+                                        self.latest_frame = img
+                        time.sleep(1.0)
+
+                    elif self.camera_cfg.source_type in (CameraSourceType.RTSP, CameraSourceType.USB):
+                        if self._cap is None or not self._cap.isOpened():
+                            if not self._open_stream():
+                                time.sleep(3.0)
+                                continue
+
+                        ret, frame = self._cap.read()
+                        if ret and frame is not None:
+                            with self._lock:
+                                self.latest_frame = frame
+                        else:
+                            time.sleep(1.0)
+                            if self._cap:
+                                self._cap.release()
+                                self._cap = None
+
+                except Exception as e:
+                    print(f"Error capturing from camera {self.camera_cfg.id}: {e}")
+                    time.sleep(2.0)
+        finally:
+            if self._cap:
+                try:
+                    self._cap.release()
+                except Exception:
+                    pass
+                self._cap = None
 
     def get_frame(self) -> Optional[np.ndarray]:
         with self._lock:
             if self.latest_frame is not None:
                 return self.latest_frame.copy()
-            # If not yet captured and synthetic, generate one on demand
             if self._synthetic_sim is not None:
                 frame = self._synthetic_sim.render_frame()
                 self.latest_frame = frame
@@ -236,7 +241,37 @@ class StreamManager:
 
     def update_config(self, config: SkyViewConfig) -> None:
         self.config = config
-        self._init_handlers()
+        current_cam_ids = {c.id: c for c in config.cameras}
+
+        # Stop and remove handlers for cameras no longer present
+        for cid in list(self.handlers.keys()):
+            if cid not in current_cam_ids:
+                self.handlers[cid].stop()
+                del self.handlers[cid]
+
+        # Update existing or add new handlers
+        for cam in config.cameras:
+            existing = self.handlers.get(cam.id)
+            if existing and existing.camera_cfg.source_type == cam.source_type and existing.camera_cfg.url_or_path == cam.url_or_path:
+                # In-place parameter update without restarting RTSP/hardware stream
+                existing.camera_cfg = cam
+                existing.lat = config.observer.latitude
+                existing.lon = config.observer.longitude
+                if existing._synthetic_sim is not None:
+                    existing._synthetic_sim.camera_cfg = cam
+                    existing._synthetic_sim.lat = config.observer.latitude
+                    existing._synthetic_sim.lon = config.observer.longitude
+                if cam.enabled and not existing._running:
+                    existing.start()
+                elif not cam.enabled and existing._running:
+                    existing.stop()
+            else:
+                if existing:
+                    existing.stop()
+                handler = CameraStreamHandler(cam, config.observer.latitude, config.observer.longitude)
+                self.handlers[cam.id] = handler
+                if cam.enabled:
+                    handler.start()
 
     def stop_all(self) -> None:
         for handler in self.handlers.values():
