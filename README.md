@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="frontend/assets/skymosaic_logo.jpg" alt="SkyMosaic Logo" width="220" style="border-radius: 24px;">
+</p>
+
 # SkyMosaic 🌌 — Multi-Camera AllSky & Celestial Stargazer Platform
 
 [![CI/CD](https://github.com/benhayashi/skymosaic/actions/workflows/ci.yml/badge.svg)](https://github.com/benhayashi/skymosaic/actions)
