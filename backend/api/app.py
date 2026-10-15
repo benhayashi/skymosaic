@@ -32,16 +32,17 @@ from backend.config import OperatingMode
 from backend.pipeline.media_generator import MediaGenerator
 from backend.pipeline.storage_manager import StorageManager
 from backend.pipeline.dvr_manager import DVRManager
+from backend.pipeline.composite_worker import CompositeWorker
 from backend.stitching.stitcher import MultiCameraStitcher
 from backend.astrometry.auto_calibrator import AutoCalibrationManager
 from backend.tracking.optical_tracker import OpticalTrackerEngine
 
 
 # Global application state
-CONFIG_PATH = "data/config.json"
+CONFIG_PATH = os.environ.get("SKYMOSAIC_CONFIG", "data/config.json")
 app_config: SkyViewConfig = load_config(CONFIG_PATH)
 # Apply startup mode preference on boot (default live_testing / test preview)
-if hasattr(app_config, "startup_mode") and app_config.startup_mode:
+if app_config.startup_mode:
     app_config.mode = app_config.startup_mode
 stream_manager = StreamManager(app_config)
 stitcher = MultiCameraStitcher(app_config)
@@ -49,7 +50,8 @@ tracker_engine = OpticalTrackerEngine(app_config)
 storage_manager = StorageManager(app_config)
 storage_manager.start()
 dvr_manager = DVRManager(max_frames=1800, archive_dir=f"{app_config.data_dir}/archive")
-dvr_manager.start_auto_recording(stream_manager, stitcher, interval_sec=1.5)
+composite_worker = CompositeWorker(stream_manager, stitcher, tracker_engine, dvr_manager)
+composite_worker.start()
 
 
 
@@ -152,9 +154,9 @@ def set_operating_mode(req: ModeChangeRequest):
 
 @app.get("/api/tracking/targets")
 def get_tracked_targets():
-    frames = stream_manager.get_all_active_frames()
-    composite = stitcher.stitch_frames(frames, overlay_annotations=False)
-    output = tracker_engine.process_stitched_frame(composite)
+    """Latest tracking result computed by the background pipeline worker (never re-stitches)."""
+    output = composite_worker.get_targets()
+    output.setdefault("mode", app_config.mode.value)
     return output
 
 
@@ -165,7 +167,7 @@ class TestADSBRequest(BaseModel):
 @app.get("/api/tracking/adsb")
 def get_adsb_aircraft():
     aircraft = tracker_engine.adsb_tracker.poll_aircraft()
-    return {"count": len(aircraft), "aircraft": aircraft}
+    return {"count": len(aircraft), "aircraft": aircraft, "status": tracker_engine.adsb_tracker.get_status()}
 
 
 @app.post("/api/tracking/adsb/test")
@@ -176,7 +178,7 @@ def test_adsb_connection(req: TestADSBRequest):
 @app.get("/api/tracking/satellites")
 def get_satellites():
     sats = tracker_engine.satellite_tracker.compute_satellite_passes()
-    return {"count": len(sats), "satellites": sats}
+    return {"count": len(sats), "satellites": sats, "status": tracker_engine.satellite_tracker.get_status()}
 
 
 class NTPSyncRequest(BaseModel):
@@ -205,8 +207,7 @@ def trigger_ntp_sync(req: Optional[NTPSyncRequest] = None):
 
 @app.get("/api/weather/sky_conditions")
 def get_sky_conditions():
-    frames = stream_manager.get_all_active_frames()
-    composite = stitcher.stitch_frames(frames, overlay_annotations=False)
+    composite = composite_worker.get_clean_composite()
     dt_utc = datetime.datetime.now(datetime.timezone.utc)
     sun_info = get_sun_coordinates(dt_utc, app_config.observer.latitude, app_config.observer.longitude)
     weather = tracker_engine.weather_plugin.process_frame(
@@ -437,46 +438,37 @@ def get_live_stitched_frame(
     timestamp: Optional[bool] = None,
     time_format: Optional[str] = None
 ):
-    frames = stream_manager.get_all_active_frames()
-    # Temporarily override stitcher timestamp settings if query params provided
-    orig_ts = stitcher.config.stitching.overlay_timestamp
-    orig_fmt = stitcher.config.stitching.time_format
+    if timestamp is None and time_format is None:
+        frame_bytes = composite_worker.get_jpeg(overlay=overlay, quality=88)
+    else:
+        # Timestamp overrides apply to the overlay only, which is drawn on a copy of the cached composite
+        orig_ts = stitcher.config.stitching.overlay_timestamp
+        orig_fmt = stitcher.config.stitching.time_format
+        if timestamp is not None:
+            stitcher.config.stitching.overlay_timestamp = timestamp
+        if time_format is not None:
+            stitcher.config.stitching.time_format = time_format
+        try:
+            frame_bytes = composite_worker.get_jpeg(overlay=overlay, quality=88, use_cache=False)
+        finally:
+            stitcher.config.stitching.overlay_timestamp = orig_ts
+            stitcher.config.stitching.time_format = orig_fmt
 
-    if timestamp is not None:
-        stitcher.config.stitching.overlay_timestamp = timestamp
-    if time_format is not None:
-        stitcher.config.stitching.time_format = time_format
-
-    try:
-        composite = stitcher.stitch_frames(frames, overlay_annotations=overlay)
-    finally:
-        stitcher.config.stitching.overlay_timestamp = orig_ts
-        stitcher.config.stitching.time_format = orig_fmt
-
-    ret, jpeg = cv2.imencode(".jpg", composite, [cv2.IMWRITE_JPEG_QUALITY, 88])
-    if not ret:
+    if not frame_bytes:
         raise HTTPException(status_code=500, detail="Failed to encode composite.")
-
-    frame_bytes = jpeg.tobytes()
-    dvr_manager.add_frame(frame_bytes)
     return Response(content=frame_bytes, media_type="image/jpeg")
 
 
-
 def mjpeg_stream_generator():
+    import time
     while True:
         try:
-            frames = stream_manager.get_all_active_frames()
-            composite = stitcher.stitch_frames(frames, overlay_annotations=True)
-            ret, jpeg = cv2.imencode(".jpg", composite, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            if ret:
-                frame_bytes = jpeg.tobytes()
-                dvr_manager.add_frame(frame_bytes)
+            frame_bytes = composite_worker.get_jpeg(overlay=True, quality=80)
+            if frame_bytes:
                 yield (b"--frame\r\n"
                        b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n")
         except Exception as e:
             print(f"Error in MJPEG stream: {e}")
-        import time
         time.sleep(0.1)  # ~10 FPS stream
 
 

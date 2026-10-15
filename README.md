@@ -24,11 +24,11 @@
   - **Timelapse / Long-Exposure Mode**: Timed integration (5s–60s) for celestial events, meteor showers, startrails, and nightly time-lapse compilation.
 - **Hierarchical Multi-Source Object Identification**:
   - **Tier 1 (Celestial)**: Real-time topocentric plate solving for stars and planets (Sun, Moon, Venus, Jupiter, Saturn, Mars) with constellation lines.
-  - **Tier 2 (Satellites)**: SGP4 orbital pass propagation correlating moving lights with satellite trajectories (ISS, Starlink, Tiangong, HST).
-  - **Tier 3 (Airplanes & ADS-B)**: Ingests live ADS-B transponder data (`readsb`/`dump1090`), converts WGS84 coordinates to local sky $(Alt, Az)$, and correlates visual lights with flight number, aircraft type, altitude, and ground speed.
+  - **Tier 2 (Satellites)**: Real SGP4 propagation of CelesTrak TLEs (stations + visual group by default, cached in `data/tle/`, refreshed every 12 h, works offline from the last cache). Only sunlit satellites above the horizon are shown. A simulated ISS pass is available only if you explicitly enable simulation.
+  - **Tier 3 (Airplanes & ADS-B)**: Ingests live ADS-B from a local receiver (`readsb` JSON or native Protobuf `aircraft.pb`, `dump1090`, `tar1090`) or a free remote provider (adsb.lol / airplanes.live) by observer location, converts WGS84 coordinates to local sky $(Alt, Az)$, and correlates visual lights with flight number, aircraft type, altitude, and ground speed.
   - **Tier 4 (AI Vision Plugins)**: Real-time daytime sky condition and cloud cover estimator (octas / percentage) and daytime silhouette detector (birds, drones, planes) / nighttime meteor streak detector.
-  - **Tier 5 (Unidentified Transients / UAP)**: Automatic triage for unclassified moving lights with trajectory vectors, angular speed (deg/s), and event archiving.
-- **Augmented Reality Sky Dome HUD**: Color-coded reticles (Yellow for planets, Purple for satellites, Cyan for flights, Red for UAPs) with flight callsigns and telemetry cards.
+  - **Tier 5 (Unidentified Lights)**: Automatic triage for bright, persistently moving lights that match no ADS-B aircraft, satellite or celestial body (global exposure changes and slow cloud drift are rejected) with trajectory vectors, angular speed (deg/s), and event archiving.
+- **Augmented Reality Sky Dome HUD**: Color-coded reticles (Yellow for planets, Purple for satellites, Cyan for flights, Red for unidentified lights) with flight callsigns and telemetry cards.
 - **Celestial Calibration Studio**:
   - Interactive browser GUI with live astronomical planetarium overlay synced to your exact GPS coordinates and capture timestamp.
   - Real-time sliders for Pointing Azimuth ($0^\circ–360^\circ$), Altitude ($-10^\circ–90^\circ$), Roll, and Field of View ($20^\circ–220^\circ$).

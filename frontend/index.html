@@ -814,6 +814,18 @@
           </div>
 
           <div class="form-row">
+            <div class="form-group col-8">
+              <label for="set-adsb-provider">ADS-B Source</label>
+              <select id="set-adsb-provider" class="form-control">
+                <option value="local">Local receiver (URL above)</option>
+                <option value="adsb.lol">Remote: adsb.lol (free, by location)</option>
+                <option value="airplanes.live">Remote: airplanes.live (free, by location)</option>
+              </select>
+              <small style="color:var(--text-dim);font-size:0.75rem;">Remote sources use your observer location and Max Range; no receiver required.</small>
+            </div>
+          </div>
+
+          <div class="form-row">
             <div class="form-group col-4">
               <label for="set-adsb-max-range">Max Range (<span id="label-adsb-range-unit">km</span>)</label>
               <input type="number" id="set-adsb-max-range" min="10" max="600" class="form-control" value="250">
@@ -826,7 +838,7 @@
                   <input type="checkbox" id="set-adsb-simulation"> Use Simulation Mode
                 </label>
               </div>
-              <small style="color:var(--text-dim);font-size:0.75rem;">Uncheck when using a real physical RTL-SDR receiver.</small>
+              <small style="color:var(--text-dim);font-size:0.75rem;">Demo only: shows fake aircraft. Leave unchecked to use real data.</small>
             </div>
             <div class="form-group col-4">
               <label>ADS-B Engine</label>

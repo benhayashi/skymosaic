@@ -1,5 +1,6 @@
 import datetime
 import math
+import threading
 import time
 from typing import Dict, List, Optional, Tuple
 import cv2
@@ -72,12 +73,23 @@ class OpticalTrackerEngine:
         self._tracks: Dict[int, OpticalTrack] = {}
         self._next_track_id = 1
         self._unidentified_events: List[Dict] = []
+        self._lock = threading.RLock()
+        self._cam_sizes: Dict[str, Tuple[int, int]] = {}
+        self._frame_counter = 0
+        self._cached_vision: List[Dict] = []
+        self._cached_weather: Dict = {}
+        self.vision_every_n = 5
+        self.weather_every_n = 10
+
+    def set_camera_sizes(self, sizes: Dict[str, Tuple[int, int]]) -> None:
+        """Provides native camera frame sizes so obstacle masks are projected with the right aspect."""
+        self._cam_sizes = dict(sizes)
 
     def update_config(self, config: SkyViewConfig) -> None:
         self.config = config
         self.adsb_tracker.config = config.adsb
         self.adsb_tracker.update_observer(config.observer)
-        self.satellite_tracker.config = config.satellites
+        self.satellite_tracker.update_config(config.satellites)
         self.satellite_tracker.update_observer(config.observer)
         self.weather_plugin.enabled = config.plugins.weather_enabled
         self.object_plugin.enabled = config.plugins.daytime_detector_enabled
@@ -143,17 +155,22 @@ class OpticalTrackerEngine:
 
             # Project into camera coordinates (using standard reference 1920x1080 for normalized coords)
             R_w2c = build_camera_rotation_matrix(cam.extrinsics)
-            pt = project_world_point_to_camera(v_world, R_w2c, cam.intrinsics, 1920, 1080)
+            cw, ch = self._cam_sizes.get(cam.id, (1920, 1080))
+            pt = project_world_point_to_camera(v_world, R_w2c, cam.intrinsics, cw, ch)
             if pt is not None:
                 px, py = pt
-                norm_x = px / 1920.0
-                norm_y = py / 1080.0
+                norm_x = px / float(cw)
+                norm_y = py / float(ch)
                 if 0.0 <= norm_x <= 1.0 and 0.0 <= norm_y <= 1.0:
-                    if point_in_polygon(px, py, all_masks, 1920, 1080):
+                    if point_in_polygon(px, py, all_masks, cw, ch):
                         return True
         return False
 
     def process_stitched_frame(self, frame: np.ndarray) -> Dict:
+        with self._lock:
+            return self._process_stitched_frame(frame)
+
+    def _process_stitched_frame(self, frame: np.ndarray) -> Dict:
         """
         Runs motion detection, tracks active objects, executes multi-source
         identification hierarchy, and runs AI vision plugins.
@@ -170,41 +187,54 @@ class OpticalTrackerEngine:
         visible_satellites = self.satellite_tracker.compute_satellite_passes(dt_utc)
 
         # 2. Run Weather Vision Plugin
-        weather_output = self.weather_plugin.process_frame(
-            frame,
-            metadata={
-                "sun_altitude_deg": sun_info["altitude_deg"],
-                "sky_state": sun_info["sky_state"],
-                "is_day": sun_info["sky_state"] == "day"
-            }
-        )
+        self._frame_counter += 1
+        if self._frame_counter % self.weather_every_n == 1 or not self._cached_weather:
+            self._cached_weather = self.weather_plugin.process_frame(
+                frame,
+                metadata={
+                    "sun_altitude_deg": sun_info["altitude_deg"],
+                    "sky_state": sun_info["sky_state"],
+                    "is_day": sun_info["sky_state"] == "day"
+                }
+            )
+        weather_output = self._cached_weather
 
         # 3. Detect moving optical targets via frame differencing
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (5, 5), 1.0)
 
+        scale = w / 1200.0  # thresholds are tuned for a 1200px canvas
         detected_centroids = []
-        if self._prev_frame is not None:
+        global_motion = False
+        if self._prev_frame is not None and self._prev_frame.shape == blurred.shape:
             diff = cv2.absdiff(blurred, self._prev_frame)
             _, thresh = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-            min_elev = getattr(self.config.stitching, "min_elevation_deg", 0.0)
-            for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if 4 <= area <= 600:
-                    M = cv2.moments(cnt)
-                    if M["m00"] > 0:
-                        cx = M["m10"] / M["m00"]
-                        cy = M["m01"] / M["m00"]
-                        # Filter out static ground objects and traffic below horizon
-                        alt, az = self.pixel_to_altaz(cx, cy, w, h)
-                        if alt >= min_elev:
-                            # Filter out motion originating within obstacle masks (swaying trees, vibrating poles)
-                            if not self.is_point_in_obstacle_mask(alt, az):
-                                detected_centroids.append((cx, cy))
+            # Global-change rejection (exposure / IR-cut switch / lightning): ignore the whole frame
+            changed_frac = float(np.count_nonzero(thresh)) / float(thresh.size)
+            if changed_frac > 0.04:
+                global_motion = True
+            else:
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                min_area = max(2.0, 4.0 * scale * scale)
+                max_area = 600.0 * scale * scale
+                min_elev = getattr(self.config.stitching, "min_elevation_deg", 0.0)
+                for cnt in contours:
+                    area = cv2.contourArea(cnt)
+                    if min_area <= area <= max_area:
+                        M = cv2.moments(cnt)
+                        if M["m00"] > 0:
+                            cx = M["m10"] / M["m00"]
+                            cy = M["m01"] / M["m00"]
+                            # Filter out static ground objects and traffic below horizon
+                            alt, az = self.pixel_to_altaz(cx, cy, w, h)
+                            if alt >= min_elev:
+                                # Filter out motion originating within obstacle masks (swaying trees, vibrating poles)
+                                if not self.is_point_in_obstacle_mask(alt, az):
+                                    detected_centroids.append((cx, cy))
 
         self._prev_frame = blurred
+        if global_motion:
+            self._tracks.clear()
 
         # 4. Associate detected centroids with active tracks
         unmatched_detections = list(detected_centroids)
@@ -213,7 +243,7 @@ class OpticalTrackerEngine:
         for track_id, track in list(self._tracks.items()):
             cur_u, cur_v = track.current_pos
             best_det = None
-            min_dist = 40.0  # max pixel association distance
+            min_dist = 40.0 * scale  # max pixel association distance
 
             for det in unmatched_detections:
                 dist = math.hypot(det[0] - cur_u, det[1] - cur_v)
@@ -225,7 +255,7 @@ class OpticalTrackerEngine:
                 track.add_point(best_det[0], best_det[1], now)
                 unmatched_detections.remove(best_det)
                 active_tracks_list.append(track)
-            elif now - track.last_update > 2.0:
+            elif now - track.last_update > 4.0:
                 # Track lost
                 del self._tracks[track_id]
 
@@ -295,19 +325,29 @@ class OpticalTrackerEngine:
                     "telemetry": sat
                 })
 
-        # D) Classify optical moving tracks
+        # D) Classify optical moving tracks. Tracks explained by ADS-B or satellites are already drawn
+        #    from their own feed (A/B/C above), so they are NOT emitted again (no duplicates).
+        r_max = (min(w, h) / 2.0) * self.config.stitching.horizon_mask_radius
+        min_motion = self.config.tracking.min_motion_pixels * scale
         for track in active_tracks_list:
-            if len(track.points) < 3:
+            if len(track.points) < 5:
+                continue
+            duration = track.points[-1][2] - track.points[0][2]
+            if duration < 1.5:
                 continue
 
             tu, tv = track.current_pos
             alt, az = self.pixel_to_altaz(tu, tv, w, h)
             vel_px = track.velocity_px_s
             # Convert pixel velocity to angular velocity on dome (90 deg / r_max px)
-            r_max = (min(w, h) / 2.0) * self.config.stitching.horizon_mask_radius
             vel_deg_s = round((vel_px / max(1.0, r_max)) * 90.0, 2)
+            net_disp = math.hypot(tu - track.points[0][0], tv - track.points[0][1])
 
-            # Check ADS-B match
+            # Jitter / noise: tracks that don't actually travel are ignored
+            if net_disp < min_motion * (len(track.points) - 1):
+                track.classification = "static"
+                continue
+
             matched_plane = self.adsb_tracker.correlate_target(alt, az, tolerance_deg=self.config.tracking.match_tolerance_deg)
             if matched_plane:
                 track.classification = "airplane"
@@ -315,7 +355,6 @@ class OpticalTrackerEngine:
                 track.telemetry = matched_plane
                 continue
 
-            # Check Satellite match
             matched_sat = self.satellite_tracker.correlate_target(alt, az, tolerance_deg=self.config.tracking.match_tolerance_deg)
             if matched_sat:
                 track.classification = "satellite"
@@ -323,64 +362,74 @@ class OpticalTrackerEngine:
                 track.telemetry = matched_sat
                 continue
 
-            # Check Celestial (stationary)
-            if vel_deg_s < 0.05:
-                track.classification = "celestial"
+            if vel_deg_s < 0.15:
+                track.classification = "drift"  # too slow to be a transient light (clouds, noise)
                 continue
 
-            # UNIDENTIFIED AERIAL OBJECT (UAP / Transient)
-            if vel_deg_s >= 0.15:
-                track.classification = "unidentified"
-                track.label = f"UAP #{track.track_id} ({vel_deg_s}°/s)"
-                track.is_unidentified = True
+            # Must be a distinct bright point against its local surroundings
+            iu, iv = int(min(max(tu, 0), w - 1)), int(min(max(tv, 0), h - 1))
+            y0, y1, x0, x1 = max(0, iv - 12), min(h, iv + 13), max(0, iu - 12), min(w, iu + 13)
+            patch = gray[y0:y1, x0:x1]
+            if patch.size == 0 or float(gray[iv, iu]) - float(np.median(patch)) < 15.0:
+                track.classification = "faint"
+                continue
 
-                uap_record = {
-                    "track_id": track.track_id,
-                    "timestamp": dt_utc.isoformat(),
-                    "pixel_x": round(tu, 1),
-                    "pixel_y": round(tv, 1),
-                    "altitude_deg": round(alt, 2),
-                    "azimuth_deg": round(az, 2),
-                    "angular_speed_deg_s": vel_deg_s,
-                    "color": "#ef4444",  # Red Alert
-                    "points_count": len(track.points)
-                }
+            # UNIDENTIFIED LIGHT
+            track.classification = "unidentified"
+            track.label = f"Unidentified light #{track.track_id} ({vel_deg_s}°/s)"
+            track.is_unidentified = True
 
-                classified_targets.append({
-                    "id": f"uap_{track.track_id}",
-                    "category": "unidentified",
-                    "subtype": "UAP",
-                    "label": track.label,
-                    "pixel_x": round(tu, 1),
-                    "pixel_y": round(tv, 1),
-                    "altitude_deg": round(alt, 2),
-                    "azimuth_deg": round(az, 2),
-                    "speed_deg_s": vel_deg_s,
-                    "color": "#ef4444",
-                    "telemetry": uap_record
-                })
+            uap_record = {
+                "track_id": track.track_id,
+                "timestamp": dt_utc.isoformat(),
+                "pixel_x": round(tu, 1),
+                "pixel_y": round(tv, 1),
+                "altitude_deg": round(alt, 2),
+                "azimuth_deg": round(az, 2),
+                "angular_speed_deg_s": vel_deg_s,
+                "color": "#ef4444",  # Red Alert
+                "points_count": len(track.points)
+            }
 
-                # Log event once per track (suppressed if in live_testing mode or auto_record is disabled)
-                recording_enabled = (
-                    self.config.mode != OperatingMode.LIVE_TESTING
-                    and self.config.tracking.uap_auto_record
-                )
-                if recording_enabled and not any(e["track_id"] == track.track_id for e in self._unidentified_events):
-                    self._unidentified_events.append(uap_record)
-                    if len(self._unidentified_events) > 50:
-                        self._unidentified_events.pop(0)
+            classified_targets.append({
+                "id": f"uap_{track.track_id}",
+                "category": "unidentified",
+                "subtype": "Unidentified light",
+                "label": track.label,
+                "pixel_x": round(tu, 1),
+                "pixel_y": round(tv, 1),
+                "altitude_deg": round(alt, 2),
+                "azimuth_deg": round(az, 2),
+                "speed_deg_s": vel_deg_s,
+                "color": "#ef4444",
+                "telemetry": uap_record
+            })
 
-        # 6. Run Object Vision Plugin (birds/drones/meteors)
-        vision_output = self.object_plugin.process_frame(
-            frame,
-            metadata={"is_day": sun_info["sky_state"] == "day"}
-        )
+            # Log event once per track (suppressed if in live_testing mode or auto_record is disabled)
+            recording_enabled = (
+                self.config.mode != OperatingMode.LIVE_TESTING
+                and self.config.tracking.uap_auto_record
+            )
+            if recording_enabled and not any(e["track_id"] == track.track_id for e in self._unidentified_events):
+                self._unidentified_events.append(uap_record)
+                if len(self._unidentified_events) > 50:
+                    self._unidentified_events.pop(0)
 
-        for det in vision_output.get("detections", []):
+        # 6. Run Object Vision Plugin (birds/drones/meteors) at a reduced cadence
+        if self._frame_counter % self.vision_every_n == 1 or global_motion:
+            vision_output = self.object_plugin.process_frame(
+                frame,
+                metadata={"is_day": sun_info["sky_state"] == "day"}
+            )
+            self._cached_vision = vision_output.get("detections", [])
+
+        for idx, det in enumerate(self._cached_vision):
             cx, cy = det["center_x"], det["center_y"]
             alt, az = self.pixel_to_altaz(cx, cy, w, h)
+            if alt < getattr(self.config.stitching, "min_elevation_deg", 0.0) or self.is_point_in_obstacle_mask(alt, az):
+                continue
             classified_targets.append({
-                "id": f"vision_{len(classified_targets)}",
+                "id": f"vision_{idx}",
                 "category": "vision_ai",
                 "subtype": det["label"],
                 "label": f"{det['label'].replace('_', ' ').title()} ({int(det['confidence']*100)}%)",
@@ -398,6 +447,11 @@ class OpticalTrackerEngine:
             "mode": self.config.mode.value,
             "sky_state": sun_info["sky_state"],
             "weather": weather_output,
+            "canvas_width": w,
+            "canvas_height": h,
+            "adsb_status": self.adsb_tracker.get_status(),
+            "satellite_status": self.satellite_tracker.get_status(),
+            "global_motion": global_motion,
             "targets_count": len(classified_targets),
             "targets": classified_targets,
             "unidentified_count": len(self._unidentified_events)

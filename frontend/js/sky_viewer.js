@@ -566,8 +566,8 @@ class SkyViewer {
     this.ctx.font = '10px JetBrains Mono, monospace';
 
     for (const target of this.targets) {
-      const px = (target.pixel_x / 1200) * w;
-      const py = (target.pixel_y / 1200) * h;
+      const px = (target.pixel_x / (this.targetCanvasW || 1200)) * w;
+      const py = (target.pixel_y / (this.targetCanvasH || 1200)) * h;
       const color = target.color || '#06b6d4';
       const cat = target.category;
 

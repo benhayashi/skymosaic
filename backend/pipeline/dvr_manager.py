@@ -1,5 +1,6 @@
 import collections
 import datetime
+import logging
 from pathlib import Path
 import threading
 from typing import Any, Dict, List, Optional, Tuple
@@ -60,7 +61,7 @@ class DVRManager:
                             if ret:
                                 self.add_frame(jpeg.tobytes(), now)
                 except Exception:
-                    pass
+                    logging.getLogger(__name__).exception("DVR recorder cycle failed")
                 time.sleep(interval_sec)
 
         self._recording_thread = threading.Thread(target=_record_loop, daemon=True, name="DVRRecorder")

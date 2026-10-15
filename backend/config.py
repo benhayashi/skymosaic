@@ -113,14 +113,18 @@ class ADSBConfig(BaseModel):
     enabled: bool = True
     url: str = Field(default="http://localhost:8080/data/aircraft.json", description="dump1090/readsb aircraft.json endpoint")
     max_range_km: float = Field(default=250.0, description="Maximum detection radius in kilometers")
-    use_simulation: bool = Field(default=True, description="Enable simulated air traffic if no local SDR feed is connected")
+    use_simulation: bool = Field(default=False, description="Use simulated air traffic instead of a real feed (demo only)")
+    provider: str = Field(default="local", description="'local' (readsb/dump1090 URL), 'adsb.lol' or 'airplanes.live' (remote by lat/lon)")
+    max_age_sec: float = Field(default=15.0, description="Drop aircraft whose last position is older than this")
 
 
 class SatelliteConfig(BaseModel):
     enabled: bool = True
     max_magnitude: float = Field(default=4.5, description="Maximum visible visual magnitude to track")
     update_interval_sec: float = Field(default=2.0, description="Ephemeris update interval in seconds")
-    use_simulation: bool = Field(default=True, description="Enable simulated satellite passes (ISS, Starlink, etc.)")
+    use_simulation: bool = Field(default=False, description="Use a simulated ISS pass instead of real TLE data (demo only)")
+    tle_groups: List[str] = Field(default_factory=lambda: ["stations", "visual"], description="CelesTrak GP groups to track")
+    tle_refresh_hours: float = Field(default=12.0, description="How often to refresh cached TLEs")
 
 
 class TrackingConfig(BaseModel):

@@ -61,6 +61,15 @@ function initUnitSystem() {
 
     const adsbRangeLabel = document.getElementById('label-adsb-range-unit');
     if (adsbRangeLabel) adsbRangeLabel.textContent = unit === 'metric' ? 'km' : 'miles';
+    // Convert the displayed Max Range value when the unit system changes (stored value is always km)
+    const rangeInput = document.getElementById('set-adsb-max-range');
+    if (rangeInput && rangeInput.dataset.unit && rangeInput.dataset.unit !== unit && rangeInput.value !== '') {
+      const v = parseFloat(rangeInput.value);
+      if (!Number.isNaN(v)) {
+        rangeInput.value = Math.round(unit === 'us' ? v * 0.621371 : v / 0.621371);
+      }
+    }
+    if (rangeInput) rangeInput.dataset.unit = unit;
 
     if (skyViewer) {
       skyViewer.setUnitSystem(unit);
@@ -890,8 +899,13 @@ function startTrackingPoller() {
       if (targetsRes.ok) {
         const data = await targetsRes.json();
         skyViewer.targets = data.targets || [];
+        if (data.canvas_width && data.canvas_height) {
+          skyViewer.targetCanvasW = data.canvas_width;
+          skyViewer.targetCanvasH = data.canvas_height;
+        }
         skyViewer.render();
         updateTargetsList(data.targets || []);
+        updateFeedHealth(data);
       }
 
       if (weatherRes.ok) {
@@ -904,7 +918,28 @@ function startTrackingPoller() {
   };
 
   pollTargets();
-  setInterval(pollTargets, 1800);
+  setInterval(pollTargets, 1000);
+}
+
+function updateFeedHealth(data) {
+  let el = document.getElementById('feed-health');
+  if (!el) {
+    const list = document.getElementById('sidebar-targets-list');
+    if (!list || !list.parentElement) return;
+    el = document.createElement('div');
+    el.id = 'feed-health';
+    el.style.cssText = 'font-size:0.7rem;color:var(--text-dim);padding:4px 8px;display:flex;gap:10px;flex-wrap:wrap;';
+    list.parentElement.insertBefore(el, list);
+  }
+  const a = data.adsb_status || {};
+  const s = data.satellite_status || {};
+  const colors = { ok: '#22c55e', simulated: '#38bdf8', pending: '#facc15', stale: '#f59e0b', error: '#ef4444', disabled: '#64748b' };
+  const adsbState = a.state || 'n/a';
+  const satText = s.simulation ? 'simulated' : (s.tle_count ? `${s.tle_count} TLEs${s.tle_age_hours != null ? ` (${s.tle_age_hours}h old)` : ''}` : (s.refreshing ? 'loading TLEs…' : 'no TLE data'));
+  const tip = a.last_error ? ` title="${String(a.last_error).replace(/"/g, '&quot;')}"` : '';
+  el.innerHTML = `<span${tip}>ADS-B: <b style="color:${colors[adsbState] || '#94a3b8'}">${adsbState}</b>${a.provider ? ` · ${a.provider}` : ''}</span>` +
+    `<span>Satellites: <b>${satText}</b></span>` +
+    (data.global_motion ? '<span style="color:#f59e0b">Global motion ignored</span>' : '');
 }
 
 function updateTargetsList(targets) {
@@ -1120,7 +1155,11 @@ function populateSettingsForm() {
 
   if (appConfig.adsb) {
     document.getElementById('set-adsb-url').value = appConfig.adsb.url || '';
-    document.getElementById('set-adsb-max-range').value = appConfig.adsb.max_range_km ?? 250;
+    const rangeInput = document.getElementById('set-adsb-max-range');
+    const rangeKm = appConfig.adsb.max_range_km ?? 250;
+    rangeInput.value = Math.round(currentUnitSystem === 'us' ? rangeKm * 0.621371 : rangeKm);
+    rangeInput.dataset.unit = currentUnitSystem;
+    document.getElementById('set-adsb-provider').value = appConfig.adsb.provider || 'local';
     document.getElementById('set-adsb-simulation').checked = !!appConfig.adsb.use_simulation;
     document.getElementById('set-adsb-enabled').checked = !!appConfig.adsb.enabled;
   }
@@ -1381,7 +1420,9 @@ function initSettingsEvents() {
 
     if (!appConfig.adsb) appConfig.adsb = {};
     appConfig.adsb.url = document.getElementById('set-adsb-url').value.trim();
-    appConfig.adsb.max_range_km = parseFloat(document.getElementById('set-adsb-max-range').value) || 250.0;
+    const rangeVal = parseFloat(document.getElementById('set-adsb-max-range').value) || (currentUnitSystem === 'us' ? 155 : 250);
+    appConfig.adsb.max_range_km = currentUnitSystem === 'us' ? rangeVal / 0.621371 : rangeVal;
+    appConfig.adsb.provider = document.getElementById('set-adsb-provider').value;
     appConfig.adsb.use_simulation = document.getElementById('set-adsb-simulation').checked;
     appConfig.adsb.enabled = document.getElementById('set-adsb-enabled').checked;
 

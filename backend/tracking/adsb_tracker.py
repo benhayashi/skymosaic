@@ -1,6 +1,7 @@
 import datetime
 import math
 import struct
+import threading
 import time
 from typing import Dict, List, Optional, Tuple
 import httpx
@@ -235,6 +236,12 @@ class ADSBTracker:
         self.sim_gen = SyntheticADSBGenerator(obs_cfg.latitude, obs_cfg.longitude)
         self.cached_aircraft: List[Dict] = []
         self.last_poll_time = 0.0
+        self.last_success_time = 0.0
+        self.last_error: Optional[str] = None
+        self.last_raw_count = 0
+        self._resolved_url: Optional[str] = None
+        self._poll_lock = threading.Lock()
+        self._client = httpx.Client(timeout=3.0, follow_redirects=True)
 
     def update_observer(self, obs_cfg: ObserverConfig) -> None:
         self.observer = obs_cfg
@@ -332,69 +339,147 @@ class ADSBTracker:
             "error": f"Failed to reach readsb/dump1090 on {target_url}. (Probed: {candidates[0] if candidates else 'N/A'}; Result: {last_err})"
         }
 
+    # ---------------- Fetching ----------------
+    REMOTE_URLS = {
+        "adsb.lol": "https://api.adsb.lol/v2/point/{lat}/{lon}/{radius_nm}",
+        "airplanes.live": "https://api.airplanes.live/v2/point/{lat}/{lon}/{radius_nm}",
+    }
+
+    def _fetch_remote(self) -> List[Dict]:
+        tmpl = self.REMOTE_URLS.get(self.config.provider)
+        if not tmpl:
+            raise ValueError(f"Unknown ADS-B provider '{self.config.provider}'")
+        radius_nm = max(1, min(250, int(self.config.max_range_km / 1.852)))
+        url = tmpl.format(lat=round(self.observer.latitude, 4), lon=round(self.observer.longitude, 4), radius_nm=radius_nm)
+        resp = self._client.get(url, timeout=6.0)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("ac") or data.get("aircraft") or []
+
+    def _fetch_local(self) -> List[Dict]:
+        """Tries the (remembered) endpoint first, then discovers a working one."""
+        candidates = self._get_candidate_urls(self.config.url)
+        if self._resolved_url and self._resolved_url in candidates:
+            candidates.remove(self._resolved_url)
+            candidates.insert(0, self._resolved_url)
+        last_err = "no candidates"
+        for url in candidates:
+            try:
+                resp = self._client.get(url, timeout=2.5)
+                if resp.status_code != 200:
+                    last_err = f"HTTP {resp.status_code} at {url}"
+                    continue
+                content_type = resp.headers.get("content-type", "").lower()
+                if "protobuf" in content_type or url.endswith(".pb"):
+                    aircraft = decode_readsb_protobuf(resp.content).get("aircraft", [])
+                else:
+                    aircraft = resp.json().get("aircraft", [])
+                self._resolved_url = url
+                return aircraft
+            except Exception as e:
+                last_err = f"{url}: {e}"
+        raise RuntimeError(last_err)
+
+    def get_status(self) -> Dict:
+        age = time.time() - self.last_success_time if self.last_success_time else None
+        if self.config.use_simulation:
+            state = "simulated"
+        elif not self.config.enabled:
+            state = "disabled"
+        elif self.last_error and (age is None or age > 10.0):
+            state = "error"
+        elif age is not None and age > max(10.0, self.config.max_age_sec):
+            state = "stale"
+        elif age is None:
+            state = "pending"
+        else:
+            state = "ok"
+        return {
+            "state": state,
+            "provider": "simulation" if self.config.use_simulation else self.config.provider,
+            "resolved_url": self._resolved_url,
+            "last_success_age_sec": round(age, 1) if age is not None else None,
+            "last_error": self.last_error,
+            "raw_count": self.last_raw_count,
+        }
+
+    @staticmethod
+    def _num(v, default=0.0):
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else default
+
     def poll_aircraft(self) -> List[Dict]:
-        """Fetches aircraft and converts them to Topocentric Alt/Az coordinates."""
-        raw_aircraft = []
+        """Fetches aircraft and converts them to Topocentric Alt/Az coordinates (cached between polls)."""
+        remote = self.config.provider in self.REMOTE_URLS
+        min_interval = 2.5 if remote else 0.75
+        with self._poll_lock:
+            now = time.time()
+            if now - self.last_poll_time < min_interval:
+                return self.cached_aircraft
+            self.last_poll_time = now
 
-        if not self.config.use_simulation and self.config.url:
-            candidates = self._get_candidate_urls(self.config.url)
-            with httpx.Client(timeout=2.0, follow_redirects=True) as client:
-                for url in candidates:
-                    try:
-                        resp = client.get(url)
-                        if resp.status_code == 200:
-                            content_type = resp.headers.get("content-type", "").lower()
-                            if "protobuf" in content_type or url.endswith(".pb"):
-                                pb_data = decode_readsb_protobuf(resp.content)
-                                raw_aircraft = pb_data.get("aircraft", [])
-                                if raw_aircraft:
-                                    break
-                            else:
-                                data = resp.json()
-                                raw_aircraft = data.get("aircraft", [])
-                                if raw_aircraft:
-                                    break
-                    except Exception:
-                        continue
+            raw_aircraft: List[Dict] = []
+            if self.config.use_simulation:
+                raw_aircraft = self.sim_gen.update_positions()
+                self.last_success_time = now
+                self.last_error = None
+            elif self.config.enabled:
+                try:
+                    raw_aircraft = self._fetch_remote() if remote else self._fetch_local()
+                    self.last_success_time = now
+                    self.last_error = None
+                except Exception as e:
+                    self.last_error = str(e)
+                    raw_aircraft = []
+            self.last_raw_count = len(raw_aircraft)
 
-        if not raw_aircraft:
-            raw_aircraft = self.sim_gen.update_positions()
+            visible_aircraft = []
+            obs_lat = self.observer.latitude
+            obs_lon = self.observer.longitude
+            obs_alt = self.observer.elevation_m
 
-        visible_aircraft = []
-        obs_lat = self.observer.latitude
-        obs_lon = self.observer.longitude
-        obs_alt = self.observer.elevation_m
+            for ac in raw_aircraft:
+                lat = ac.get("lat")
+                lon = ac.get("lon")
+                if lat is None or lon is None:
+                    continue
+                seen_pos = ac.get("seen_pos")
+                if isinstance(seen_pos, (int, float)) and seen_pos > self.config.max_age_sec:
+                    continue
 
-        for ac in raw_aircraft:
-            lat = ac.get("lat")
-            lon = ac.get("lon")
-            alt_ft = ac.get("alt_geom") or ac.get("alt_baro") or ac.get("alt_ft", 0)
-            if lat is None or lon is None:
-                continue
+                alt_baro = ac.get("alt_baro")
+                on_ground = alt_baro == "ground"
+                alt_ft = ac.get("alt_ft")
+                if alt_ft is None:
+                    alt_ft = ac.get("alt_geom")
+                if alt_ft is None:
+                    alt_ft = alt_baro
+                alt_ft = 0.0 if on_ground else self._num(alt_ft)
 
-            alt_m = alt_ft * 0.3048
-            alt_deg, az_deg, range_km = aircraft_to_altaz(lat, lon, alt_m, obs_lat, obs_lon, obs_alt)
+                alt_deg, az_deg, range_km = aircraft_to_altaz(lat, lon, alt_ft * 0.3048, obs_lat, obs_lon, obs_alt)
+                if alt_deg < 0.0 or range_km > self.config.max_range_km:
+                    continue
 
-            if alt_deg >= 0.0 and range_km <= self.config.max_range_km:
-                flight = ac.get("flight", "").strip() or ac.get("icao", "Unknown")
+                flight = (ac.get("flight") or "").strip() or ac.get("icao") or ac.get("hex") or "Unknown"
+                speed = ac.get("gs", ac.get("speed", ac.get("speed_kts")))
                 visible_aircraft.append({
                     "id": ac.get("icao") or ac.get("hex") or flight,
                     "flight": flight,
-                    "type": ac.get("type", "Aircraft"),
+                    "type": ac.get("type") or ac.get("t") or "Aircraft",
                     "lat": round(lat, 4),
                     "lon": round(lon, 4),
                     "altitude_ft": int(alt_ft),
                     "altitude_deg": round(alt_deg, 2),
                     "azimuth_deg": round(az_deg, 2),
                     "range_km": round(range_km, 1),
-                    "speed_kts": int(ac.get("speed") or ac.get("speed_kts", 0)),
-                    "track_deg": round(float(ac.get("track") or ac.get("track_deg", 0.0)), 1),
-                    "squawk": ac.get("squawk", "1200"),
+                    "speed_kts": int(self._num(speed)),
+                    "track_deg": round(self._num(ac.get("track", ac.get("track_deg"))), 1),
+                    "squawk": ac.get("squawk") or "1200",
+                    "on_ground": on_ground,
                     "source": "adsb"
                 })
 
-        self.cached_aircraft = visible_aircraft
-        return visible_aircraft
+            self.cached_aircraft = visible_aircraft
+            return visible_aircraft
 
     def correlate_target(self, target_alt: float, target_az: float, tolerance_deg: float = 3.0) -> Optional[Dict]:
         """
