@@ -670,7 +670,7 @@ function initActionButtons() {
   initDvrControls();
 }
 
-// Canvas Pan & Zoom HUD controls
+// Canvas Pan, Zoom & Rotation HUD controls
 function initZoomControls() {
   document.getElementById('btn-zoom-in')?.addEventListener('click', () => {
     skyViewer?.zoomIn();
@@ -678,6 +678,14 @@ function initZoomControls() {
 
   document.getElementById('btn-zoom-out')?.addEventListener('click', () => {
     skyViewer?.zoomOut();
+  });
+
+  document.getElementById('btn-rotate-ccw')?.addEventListener('click', () => {
+    skyViewer?.rotateBy(-15);
+  });
+
+  document.getElementById('btn-rotate-cw')?.addEventListener('click', () => {
+    skyViewer?.rotateBy(15);
   });
 
   document.getElementById('btn-zoom-reset')?.addEventListener('click', () => {
@@ -797,9 +805,21 @@ function initModeSwitcher() {
       btnTimelapse?.classList.add('active');
       if (badge) {
         badge.textContent = 'TIMELAPSE / LONG-EXPOSURE MODE';
-        badge.style.color = 'var(--text-main)';
-      }
       skyViewer.pollInterval = 5000;
+    }
+
+    const runningModeLabel = document.getElementById('label-current-running-mode');
+    if (runningModeLabel) {
+      if (mode === 'live_testing') {
+        runningModeLabel.textContent = 'Test Preview (No disk writes)';
+        runningModeLabel.style.color = 'var(--accent-success)';
+      } else if (mode === 'feed') {
+        runningModeLabel.textContent = 'Live Feed (Recording)';
+        runningModeLabel.style.color = 'var(--accent-primary)';
+      } else if (mode === 'long_exposure') {
+        runningModeLabel.textContent = 'Long Exposure / Timelapse';
+        runningModeLabel.style.color = 'var(--accent-amber)';
+      }
     }
   };
 
@@ -1044,6 +1064,27 @@ async function loadGallery() {
 // Settings form
 function populateSettingsForm() {
   if (!appConfig) return;
+
+  // Startup operating mode
+  const startupSelect = document.getElementById('set-startup-mode');
+  if (startupSelect) {
+    startupSelect.value = appConfig.startup_mode || 'live_testing';
+  }
+  const runningModeLabel = document.getElementById('label-current-running-mode');
+  if (runningModeLabel) {
+    const cur = appConfig.mode || 'live_testing';
+    if (cur === 'live_testing') {
+      runningModeLabel.textContent = 'Test Preview (No disk writes)';
+      runningModeLabel.style.color = 'var(--accent-success)';
+    } else if (cur === 'feed') {
+      runningModeLabel.textContent = 'Live Feed (Recording)';
+      runningModeLabel.style.color = 'var(--accent-primary)';
+    } else if (cur === 'long_exposure') {
+      runningModeLabel.textContent = 'Long Exposure / Timelapse';
+      runningModeLabel.style.color = 'var(--accent-amber)';
+    }
+  }
+
   document.getElementById('set-lat').value = appConfig.observer.latitude;
   document.getElementById('set-lon').value = appConfig.observer.longitude;
   const elevInput = document.getElementById('set-elevation');
@@ -1303,6 +1344,12 @@ function initSettingsEvents() {
 
   document.getElementById('btn-save-all-settings')?.addEventListener('click', async () => {
     if (!appConfig) return;
+
+    // Save startup operating mode
+    const startupSelect = document.getElementById('set-startup-mode');
+    if (startupSelect) {
+      appConfig.startup_mode = startupSelect.value;
+    }
 
     appConfig.observer.latitude = parseFloat(document.getElementById('set-lat').value);
     appConfig.observer.longitude = parseFloat(document.getElementById('set-lon').value);

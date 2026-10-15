@@ -15,16 +15,21 @@ class SkyViewer {
     this.constellations = [];
     this.targets = [];
 
-    // --- Pan & Zoom State ---
+    // --- Pan, Zoom & Rotation State ---
     this.zoom = 1.0;
     this.minZoom = 0.8;
     this.maxZoom = 10.0;
     this.panX = 0.0;
     this.panY = 0.0;
+    this.rotationDeg = 0.0; // 0 = North up, positive = clockwise
     this.isDragging = false;
+    this.isRotating = false;
     this.dragStartX = 0;
     this.dragStartY = 0;
+    this.rotateStartAngle = 0;
+    this.rotateBaseDeg = 0;
     this.lastTouchDist = null;
+    this.lastTouchAngle = null;
 
     // --- DVR & Playback State ---
     this.isLive = true;
@@ -102,46 +107,77 @@ class SkyViewer {
       }
     }, { passive: false });
 
-    // 2. Mouse Drag Pan
+    // Prevent context menu on right click so user can right-drag to rotate
+    this.canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+    });
+
+    // 2. Mouse Drag (Left-Drag = Pan, Shift+Left-Drag or Right-Drag = Rotate)
     this.canvas.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return; // Left click only
-      this.isDragging = true;
-      this.dragStartX = e.clientX - this.panX;
-      this.dragStartY = e.clientY - this.panY;
-      this.canvas.style.cursor = 'grabbing';
+      const rect = this.canvas.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+
+      if (e.shiftKey || e.altKey || e.button === 2) {
+        // Dome Rotation Drag
+        e.preventDefault();
+        this.isRotating = true;
+        this.isDragging = false;
+        this.rotateStartAngle = Math.atan2(e.clientY - cy, e.clientX - cx);
+        this.rotateBaseDeg = this.rotationDeg;
+        this.canvas.style.cursor = 'crosshair';
+      } else if (e.button === 0) {
+        // Canvas Pan Drag
+        this.isDragging = true;
+        this.isRotating = false;
+        this.dragStartX = e.clientX - this.panX;
+        this.dragStartY = e.clientY - this.panY;
+        this.canvas.style.cursor = 'grabbing';
+      }
     });
 
     window.addEventListener('mousemove', (e) => {
-      if (!this.isDragging) return;
-      this.panX = e.clientX - this.dragStartX;
-      this.panY = e.clientY - this.dragStartY;
-      this.render();
+      if (this.isRotating) {
+        const rect = this.canvas.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const currentAngle = Math.atan2(e.clientY - cy, e.clientX - cx);
+        const deltaAngleDeg = (currentAngle - this.rotateStartAngle) * (180.0 / Math.PI);
+        this.setRotation(this.rotateBaseDeg + deltaAngleDeg);
+      } else if (this.isDragging) {
+        this.panX = e.clientX - this.dragStartX;
+        this.panY = e.clientY - this.dragStartY;
+        this.render();
+      }
     });
 
     window.addEventListener('mouseup', () => {
-      if (this.isDragging) {
+      if (this.isDragging || this.isRotating) {
         this.isDragging = false;
+        this.isRotating = false;
         this.updateCursor();
       }
     });
 
-    // 3. Double-Click to Reset Zoom & Pan
+    // 3. Double-Click to Reset Zoom, Pan & Rotation
     this.canvas.addEventListener('dblclick', () => {
       this.resetZoom();
     });
 
-    // 4. Touch Gestures: Pinch-to-zoom & single-finger pan for mobile
+    // 4. Touch Gestures: Pinch-to-zoom, two-finger twist to rotate, and single-finger pan for mobile
     this.canvas.addEventListener('touchstart', (e) => {
       if (e.touches.length === 1) {
         this.isDragging = true;
+        this.isRotating = false;
         this.dragStartX = e.touches[0].clientX - this.panX;
         this.dragStartY = e.touches[0].clientY - this.panY;
       } else if (e.touches.length === 2) {
         this.isDragging = false;
-        this.lastTouchDist = Math.hypot(
-          e.touches[0].clientX - e.touches[1].clientX,
-          e.touches[0].clientY - e.touches[1].clientY
-        );
+        const dx = e.touches[1].clientX - e.touches[0].clientX;
+        const dy = e.touches[1].clientY - e.touches[0].clientY;
+        this.lastTouchDist = Math.hypot(dx, dy);
+        this.lastTouchAngle = Math.atan2(dy, dx);
+        this.rotateBaseDeg = this.rotationDeg;
       }
     }, { passive: true });
 
@@ -150,14 +186,26 @@ class SkyViewer {
         this.panX = e.touches[0].clientX - this.dragStartX;
         this.panY = e.touches[0].clientY - this.dragStartY;
         this.render();
-      } else if (e.touches.length === 2 && this.lastTouchDist) {
-        const curDist = Math.hypot(
-          e.touches[0].clientX - e.touches[1].clientX,
-          e.touches[0].clientY - e.touches[1].clientY
-        );
-        const factor = curDist / this.lastTouchDist;
-        this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom * factor));
-        this.lastTouchDist = curDist;
+      } else if (e.touches.length === 2) {
+        const dx = e.touches[1].clientX - e.touches[0].clientX;
+        const dy = e.touches[1].clientY - e.touches[0].clientY;
+
+        // Pinch-to-zoom
+        if (this.lastTouchDist) {
+          const curDist = Math.hypot(dx, dy);
+          const factor = curDist / this.lastTouchDist;
+          this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom * factor));
+          this.lastTouchDist = curDist;
+        }
+
+        // Two-finger twist rotation
+        if (this.lastTouchAngle !== null) {
+          const curAngle = Math.atan2(dy, dx);
+          let deltaAngleDeg = (curAngle - this.lastTouchAngle) * (180.0 / Math.PI);
+          this.setRotation(this.rotationDeg + deltaAngleDeg);
+          this.lastTouchAngle = curAngle;
+        }
+
         this.updateZoomUI();
         this.render();
       }
@@ -165,7 +213,9 @@ class SkyViewer {
 
     this.canvas.addEventListener('touchend', () => {
       this.isDragging = false;
+      this.isRotating = false;
       this.lastTouchDist = null;
+      this.lastTouchAngle = null;
     }, { passive: true });
   }
 
@@ -193,10 +243,32 @@ class SkyViewer {
     this.render();
   }
 
+  rotateBy(degrees) {
+    this.setRotation(this.rotationDeg + degrees);
+  }
+
+  setRotation(degrees) {
+    // Normalize to 0 - 360 range
+    let norm = degrees % 360;
+    if (norm < 0) norm += 360;
+    // Snap near 0 / 360
+    if (Math.abs(norm) < 0.75 || Math.abs(norm - 360) < 0.75) {
+      norm = 0.0;
+    }
+    this.rotationDeg = norm;
+    this.updateZoomUI();
+    this.render();
+  }
+
+  resetRotation() {
+    this.setRotation(0.0);
+  }
+
   resetZoom() {
     this.zoom = 1.0;
     this.panX = 0.0;
     this.panY = 0.0;
+    this.rotationDeg = 0.0;
     this.updateZoomUI();
     this.render();
   }
@@ -208,9 +280,27 @@ class SkyViewer {
       badge.textContent = `${this.zoom.toFixed(1)}x`;
       badge.style.display = this.zoom !== 1.0 ? 'inline-block' : 'none';
     }
+
+    const headingBadge = document.getElementById('val-canvas-heading');
+    if (headingBadge) {
+      const deg = Math.round(this.rotationDeg);
+      let cardinal = 'N';
+      if (deg >= 23 && deg < 68) cardinal = 'NE';
+      else if (deg >= 68 && deg < 113) cardinal = 'E';
+      else if (deg >= 113 && deg < 158) cardinal = 'SE';
+      else if (deg >= 158 && deg < 203) cardinal = 'S';
+      else if (deg >= 203 && deg < 248) cardinal = 'SW';
+      else if (deg >= 248 && deg < 293) cardinal = 'W';
+      else if (deg >= 293 && deg < 338) cardinal = 'NW';
+
+      headingBadge.textContent = `${deg}° ${cardinal}`;
+      headingBadge.style.opacity = deg !== 0 ? '1.0' : '0.75';
+    }
+
     const resetBtn = document.getElementById('btn-zoom-reset');
     if (resetBtn) {
-      resetBtn.style.opacity = (this.zoom !== 1.0 || this.panX !== 0 || this.panY !== 0) ? '1.0' : '0.4';
+      const isModified = (this.zoom !== 1.0 || this.panX !== 0 || this.panY !== 0 || this.rotationDeg !== 0);
+      resetBtn.style.opacity = isModified ? '1.0' : '0.4';
     }
   }
 
@@ -444,10 +534,13 @@ class SkyViewer {
     this.ctx.save();
     this.ctx.clearRect(0, 0, w, h);
 
-    // Apply Pan & Zoom transformations centered on the canvas
+    // Apply Pan, Zoom & Rotation transformations centered on the canvas
     const cx = w / 2;
     const cy = h / 2;
     this.ctx.translate(cx + this.panX, cy + this.panY);
+    if (this.rotationDeg !== 0) {
+      this.ctx.rotate(this.rotationDeg * (Math.PI / 180.0));
+    }
     this.ctx.scale(this.zoom, this.zoom);
     this.ctx.translate(-cx, -cy);
 

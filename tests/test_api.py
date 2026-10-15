@@ -12,6 +12,8 @@ def test_api_config():
     assert "observer" in data
     assert "cameras" in data
     assert "stitching" in data
+    assert "startup_mode" in data
+    assert data["startup_mode"] in ["live_testing", "feed", "long_exposure"]
 
 
 def test_api_cameras_list():

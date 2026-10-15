@@ -40,6 +40,9 @@ from backend.tracking.optical_tracker import OpticalTrackerEngine
 # Global application state
 CONFIG_PATH = "data/config.json"
 app_config: SkyViewConfig = load_config(CONFIG_PATH)
+# Apply startup mode preference on boot (default live_testing / test preview)
+if hasattr(app_config, "startup_mode") and app_config.startup_mode:
+    app_config.mode = app_config.startup_mode
 stream_manager = StreamManager(app_config)
 stitcher = MultiCameraStitcher(app_config)
 tracker_engine = OpticalTrackerEngine(app_config)

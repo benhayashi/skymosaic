@@ -147,12 +147,17 @@
           <div class="canvas-wrapper">
             <canvas id="sky-canvas" width="1200" height="1200"></canvas>
 
-            <!-- On-Canvas Zoom HUD Controls -->
+            <!-- On-Canvas Zoom & Rotation HUD Controls -->
             <div class="canvas-zoom-hud">
               <button type="button" id="btn-zoom-in" class="zoom-hud-btn" title="Zoom In (+)">+</button>
               <button type="button" id="btn-zoom-out" class="zoom-hud-btn" title="Zoom Out (−)">−</button>
-              <button type="button" id="btn-zoom-reset" class="zoom-hud-btn" title="Reset Zoom & Pan (1:1)">⟲</button>
+              <div class="zoom-hud-divider"></div>
+              <button type="button" id="btn-rotate-ccw" class="zoom-hud-btn" title="Rotate Dome Counter-Clockwise (↺ 15° / Shift+Drag)">↺</button>
+              <button type="button" id="btn-rotate-cw" class="zoom-hud-btn" title="Rotate Dome Clockwise (↻ 15° / Shift+Drag)">↻</button>
+              <div class="zoom-hud-divider"></div>
+              <button type="button" id="btn-zoom-reset" class="zoom-hud-btn" title="Reset Pan, Zoom & Rotation (1:1 / 0°)">⟲</button>
               <span id="val-canvas-zoom" class="zoom-hud-badge" style="display: none;">1.0x</span>
+              <span id="val-canvas-heading" class="zoom-hud-badge heading-badge" title="Dome Orientation (North at top = 0°)">0° N</span>
             </div>
 
             <div id="sky-loader" class="canvas-loader hidden">
@@ -513,6 +518,34 @@
     <!-- TAB 5: SETTINGS -->
     <section id="tab-settings" class="tab-pane" role="tabpanel">
       <div class="settings-layout">
+        <div class="card settings-card">
+          <div class="section-title-row">
+            <h2>System Startup & Operating Mode</h2>
+            <div id="startup-mode-badge" class="badge-pill" style="background:rgba(16, 185, 129, 0.15);color:var(--accent-success);border:1px solid rgba(16, 185, 129, 0.3);">Safe Startup</div>
+          </div>
+          <p class="card-caption">Configure how SkyMosaic behaves when launched or reloaded. Set whether the system boots into Test Preview (safe mode without disk writes) or active recording modes.</p>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="set-startup-mode">Default Startup Operating Mode</label>
+              <select id="set-startup-mode" class="form-control">
+                <option value="live_testing" selected>Test Preview (Safe Mode — Live View, No Disk Writes / Zero Disk Fill)</option>
+                <option value="feed">Live Feed (Real-Time 30 FPS Stream & Live Recording)</option>
+                <option value="long_exposure">Long Exposure / Timelapse (Scheduled Celestial Captures & Archiving)</option>
+              </select>
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">
+                Controls initial state on system boot. You can still switch modes dynamically from the header at any time.
+              </small>
+            </div>
+            <div class="form-group col-6">
+              <label>Current Running Mode</label>
+              <div style="display:flex;align-items:center;height:38px;">
+                <span id="label-current-running-mode" style="font-family:var(--font-mono);font-size:0.9rem;color:var(--accent-cyan);font-weight:600;">Test Preview</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="card settings-card">
           <div class="section-title-row">
             <h2>Observer Geographic Location & Units</h2>

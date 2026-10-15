@@ -171,7 +171,8 @@ class PipelineConfig(BaseModel):
 
 
 class SkyViewConfig(BaseModel):
-    mode: OperatingMode = Field(default=OperatingMode.FEED, description="Operating mode: 'feed' or 'long_exposure'")
+    mode: OperatingMode = Field(default=OperatingMode.FEED, description="Operating mode: 'feed', 'long_exposure', or 'live_testing'")
+    startup_mode: OperatingMode = Field(default=OperatingMode.LIVE_TESTING, description="Default operating mode on startup (e.g. 'live_testing', 'feed', 'long_exposure')")
     observer: ObserverConfig = Field(default_factory=ObserverConfig)
     cameras: List[CameraConfig] = Field(default_factory=list)
     stitching: StitchingConfig = Field(default_factory=StitchingConfig)
