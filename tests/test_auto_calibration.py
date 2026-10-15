@@ -178,3 +178,76 @@ def test_api_auto_calibration_endpoints():
     sol_json = solve_resp.json()
     assert "status" in sol_json
     assert "results" in sol_json
+
+
+def test_solve_lens_distortion_k1():
+    # Setup ground truth camera with barrel distortion k1 = -0.06
+    true_az = 45.0
+    true_alt = 55.0
+    true_roll = 0.0
+    true_fov = 85.0
+    true_k1 = -0.06
+    lens_model = LensModelType.RECTILINEAR
+    w, h = 1280, 720
+
+    dt = datetime.datetime(2026, 10, 14, 2, 0, 0, tzinfo=datetime.timezone.utc)
+    lat, lon = 40.71, -74.00
+    lst = get_lst_deg(dt, lon)
+
+    ext_true = CameraExtrinsics(azimuth_deg=true_az, altitude_deg=true_alt, roll_deg=true_roll)
+    intr_true = CameraIntrinsics(lens_model=lens_model, fov_deg=true_fov, k1=true_k1)
+    R_w2c_true = build_camera_rotation_matrix(ext_true)
+
+    matches = []
+    for star in BRIGHT_STARS:
+        alt, az = radec_to_altaz(star["ra"], star["dec"], lat, lst)
+        if alt < 10.0:
+            continue
+        v = altaz_to_unit_vector(alt, az)
+        proj = project_world_point_to_camera(v, R_w2c_true, intr_true, w, h)
+        if proj is not None:
+            px, py = proj
+            if 30 < px < w - 30 and 30 < py < h - 30:
+                matches.append({
+                    "pixel_x": px,
+                    "pixel_y": py,
+                    "star_id": star["id"]
+                })
+
+    assert len(matches) >= 4
+
+    # Run solver with solve_distortion=True and initial k1=0.0
+    sol = auto_plate_solve_camera(
+        image=np.zeros((h, w, 3), dtype=np.uint8), # dummy image not used when matches passed directly to solver
+        dt=dt,
+        lat_deg=lat,
+        lon_deg=lon,
+        lens_model=lens_model,
+        init_extrinsics=CameraExtrinsics(azimuth_deg=true_az + 3.0, altitude_deg=true_alt - 2.0),
+        init_fov=true_fov - 2.0,
+        init_k1=0.0,
+        solve_distortion=True
+    )
+    # Also test solve_camera_pose_from_matches directly
+    from backend.astrometry.solver import solve_camera_pose_from_matches
+    sol_direct = solve_camera_pose_from_matches(
+        matches=matches,
+        dt=dt,
+        lat_deg=lat,
+        lon_deg=lon,
+        img_w=w,
+        img_h=h,
+        lens_model=lens_model,
+        init_extrinsics=CameraExtrinsics(azimuth_deg=true_az + 2.0, altitude_deg=true_alt - 2.0),
+        init_fov=true_fov + 1.0,
+        init_k1=0.0,
+        solve_distortion=True
+    )
+
+    assert sol_direct["success"] is True
+    assert abs(sol_direct["azimuth_deg"] - true_az) < 1.0
+    assert abs(sol_direct["altitude_deg"] - true_alt) < 1.0
+    assert abs(sol_direct["fov_deg"] - true_fov) < 1.0
+    assert abs(sol_direct["k1"] - true_k1) < 0.015
+    assert sol_direct["rms_error_px"] < 1.0
+

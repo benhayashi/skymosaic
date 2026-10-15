@@ -81,14 +81,16 @@ def solve_camera_pose_from_matches(
     img_h: int,
     lens_model: LensModelType,
     init_extrinsics: Optional[CameraExtrinsics] = None,
-    init_fov: Optional[float] = None
+    init_fov: Optional[float] = None,
+    init_k1: Optional[float] = None,
+    solve_distortion: bool = False
 ) -> Dict:
     """
-    Solves for camera orientation (Azimuth, Altitude, Roll) and Field of View (FOV)
-    using user-matched star points on the test shot.
+    Solves for camera orientation (Azimuth, Altitude, Roll), Field of View (FOV),
+    and optionally radial lens distortion (k1) using user-matched star points.
     
     Returns:
-        dict containing 'azimuth_deg', 'altitude_deg', 'roll_deg', 'fov_deg',
+        dict containing 'azimuth_deg', 'altitude_deg', 'roll_deg', 'fov_deg', 'k1',
         'rms_error_px', 'reprojections'.
     """
     if len(matches) < 2:
@@ -113,20 +115,34 @@ def solve_camera_pose_from_matches(
     if len(world_vectors) < 2:
         raise ValueError("Could not find sufficient valid catalog stars among the matches.")
 
+    # Only enable distortion co-optimization if requested and we have >= 4 stars
+    optimize_k1 = solve_distortion and len(world_vectors) >= 4
+
     # Initial guess
     init_az = init_extrinsics.azimuth_deg if init_extrinsics else 0.0
     init_alt = init_extrinsics.altitude_deg if init_extrinsics else 45.0
     init_roll = init_extrinsics.roll_deg if init_extrinsics else 0.0
     init_fov_val = init_fov if init_fov else 85.0
+    k1_init_val = init_k1 if init_k1 is not None else 0.0
 
-    x0 = [init_az, init_alt, init_roll, init_fov_val]
-    lower_bounds = [0.0, -10.0, -180.0, 20.0]
-    upper_bounds = [360.0, 90.0, 180.0, 220.0]
+    if optimize_k1:
+        x0 = [init_az, init_alt, init_roll, init_fov_val, k1_init_val]
+        lower_bounds = [0.0, -10.0, -180.0, 20.0, -0.4]
+        upper_bounds = [360.0, 90.0, 180.0, 220.0, 0.4]
+    else:
+        x0 = [init_az, init_alt, init_roll, init_fov_val]
+        lower_bounds = [0.0, -10.0, -180.0, 20.0]
+        upper_bounds = [360.0, 90.0, 180.0, 220.0]
 
     def residual_vector(params):
-        az_val, alt_val, roll_val, fov_val = params
-        ext = CameraExtrinsics(azimuth_deg=az_val % 360.0, altitude_deg=alt_val, roll_deg=roll_val % 360.0)
-        intr = CameraIntrinsics(lens_model=lens_model, fov_deg=fov_val)
+        if optimize_k1:
+            az_val, alt_val, roll_val, fov_val, k1_val = params
+        else:
+            az_val, alt_val, roll_val, fov_val = params
+            k1_val = k1_init_val
+
+        ext = CameraExtrinsics(azimuth_deg=az_val % 360.0, altitude_deg=alt_val, roll_deg=roll_val)
+        intr = CameraIntrinsics(lens_model=lens_model, fov_deg=fov_val, k1=k1_val)
         R_w2c = build_camera_rotation_matrix(ext)
 
         resids = []
@@ -149,7 +165,7 @@ def solve_camera_pose_from_matches(
             xtol=1e-8,
             gtol=1e-8
         )
-        opt_az, opt_alt, opt_roll, opt_fov = ls_res.x
+        opt_params = ls_res.x
         is_success = bool(ls_res.success)
     except Exception:
         def objective(params):
@@ -158,21 +174,22 @@ def solve_camera_pose_from_matches(
 
         bounds_tuples = list(zip(lower_bounds, upper_bounds))
         res = minimize(objective, x0, method="Powell", bounds=bounds_tuples, options={"maxiter": 2000, "xtol": 1e-4})
-        opt_az, opt_alt, opt_roll, opt_fov = res.x
+        opt_params = res.x
         is_success = bool(res.success)
 
-    opt_az = float(opt_az % 360.0)
-    opt_alt = float(max(-10.0, min(90.0, opt_alt)))
-    opt_roll = float(opt_roll)
+    opt_az = float(opt_params[0] % 360.0)
+    opt_alt = float(max(-10.0, min(90.0, opt_params[1])))
+    opt_roll = float(opt_params[2])
     while opt_roll > 180.0:
         opt_roll -= 360.0
     while opt_roll < -180.0:
         opt_roll += 360.0
-    opt_fov = float(opt_fov)
+    opt_fov = float(opt_params[3])
+    opt_k1 = float(opt_params[4]) if optimize_k1 else k1_init_val
 
     # Compute final reprojections
     final_ext = CameraExtrinsics(azimuth_deg=opt_az, altitude_deg=opt_alt, roll_deg=opt_roll)
-    final_intr = CameraIntrinsics(lens_model=lens_model, fov_deg=opt_fov)
+    final_intr = CameraIntrinsics(lens_model=lens_model, fov_deg=opt_fov, k1=opt_k1)
     R_w2c = build_camera_rotation_matrix(final_ext)
 
     reprojections = []
@@ -209,6 +226,7 @@ def solve_camera_pose_from_matches(
         "altitude_deg": round(opt_alt, 2),
         "roll_deg": round(opt_roll, 2),
         "fov_deg": round(opt_fov, 2),
+        "k1": round(opt_k1, 4),
         "rms_error_px": round(rms_error, 2),
         "reprojections": reprojections
     }
@@ -222,6 +240,8 @@ def auto_plate_solve_camera(
     lens_model: LensModelType = LensModelType.RECTILINEAR,
     init_extrinsics: Optional[CameraExtrinsics] = None,
     init_fov: Optional[float] = None,
+    init_k1: Optional[float] = None,
+    solve_distortion: bool = False,
     max_search_dist_px: float = 80.0
 ) -> Dict:
     """
@@ -327,7 +347,9 @@ def auto_plate_solve_camera(
         img_h=h,
         lens_model=lens_model,
         init_extrinsics=ext_prior,
-        init_fov=est_fov
+        init_fov=est_fov,
+        init_k1=init_k1,
+        solve_distortion=solve_distortion
     )
 
     # 4. Outlier pruning (trim misidentified edge peaks or distortion outliers)
@@ -355,7 +377,9 @@ def auto_plate_solve_camera(
                     img_h=h,
                     lens_model=lens_model,
                     init_extrinsics=ref_ext,
-                    init_fov=sol["fov_deg"]
+                    init_fov=sol["fov_deg"],
+                    init_k1=sol.get("k1", init_k1),
+                    solve_distortion=solve_distortion
                 )
                 if refined_sol.get("rms_error_px", 999.0) < sol.get("rms_error_px", 999.0):
                     sol = refined_sol

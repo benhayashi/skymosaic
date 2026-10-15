@@ -408,11 +408,14 @@ class CalibrationStudio {
     }
 
     try {
+      const solveDistortion = document.getElementById('calib-solve-distortion')?.checked || false;
       const payload = {
         camera_id: this.activeCamera.id,
         matches: this.starMatches,
         lens_model: this.lensModel,
         init_fov: this.fov,
+        init_k1: this.k1,
+        solve_distortion: solveDistortion,
         img_width: this.canvas.width,
         img_height: this.canvas.height
       };
@@ -433,6 +436,9 @@ class CalibrationStudio {
       this.altitude = sol.altitude_deg;
       this.roll = sol.roll_deg;
       this.fov = sol.fov_deg;
+      if (sol.k1 !== undefined) {
+        this.k1 = sol.k1;
+      }
 
       this.updateControlsUI();
       this.render();
@@ -458,10 +464,12 @@ class CalibrationStudio {
 
     try {
       const timeVal = document.getElementById('calib-time-input')?.value;
+      const solveDistortion = document.getElementById('calib-solve-distortion')?.checked || false;
       const payload = {
         camera_id: this.activeCamera.id,
         apply_to_camera: true,
         force: true,
+        solve_distortion: solveDistortion,
         timestamp_iso: timeVal ? new Date(timeVal).toISOString() : null
       };
 
@@ -482,6 +490,9 @@ class CalibrationStudio {
       this.altitude = camRes.altitude_deg;
       this.roll = camRes.roll_deg;
       this.fov = camRes.fov_deg;
+      if (camRes.k1 !== undefined) {
+        this.k1 = camRes.k1;
+      }
 
       if (camRes.matched_stars && camRes.matched_stars.length > 0) {
         this.starMatches = camRes.matched_stars.map(m => ({
@@ -495,10 +506,11 @@ class CalibrationStudio {
       this.updateControlsUI();
       this.render();
 
+      const distMsg = solveDistortion && camRes.k1 !== undefined ? `, k1 ${camRes.k1}` : '';
       if (window.showToast) {
-        showToast(`Auto-calibrated: Az ${this.azimuth}°, Alt ${this.altitude}°, RMS ${camRes.rms_error_px}px (${camRes.match_count || camRes.matched_stars?.length} stars)`, 'success');
+        showToast(`Auto-calibrated: Az ${this.azimuth}°, Alt ${this.altitude}°, FOV ${this.fov}°${distMsg}, RMS ${camRes.rms_error_px}px`, 'success');
       } else {
-        alert(`Camera pose auto-solved!\nAzimuth: ${this.azimuth}°\nAltitude: ${this.altitude}°\nRoll: ${this.roll}°\nFOV: ${this.fov}°\nRMS Error: ${camRes.rms_error_px} px`);
+        alert(`Camera pose auto-solved!\nAzimuth: ${this.azimuth}°\nAltitude: ${this.altitude}°\nRoll: ${this.roll}°\nFOV: ${this.fov}°${distMsg}\nRMS Error: ${camRes.rms_error_px} px`);
       }
 
       if (window.loadCameras) {

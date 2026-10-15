@@ -81,6 +81,8 @@ class SolveCalibrationRequest(BaseModel):
     timestamp_iso: Optional[str] = None
     lens_model: LensModelType = LensModelType.RECTILINEAR
     init_fov: Optional[float] = None
+    init_k1: Optional[float] = None
+    solve_distortion: bool = False
     img_width: int = 1280
     img_height: int = 720
 
@@ -90,6 +92,7 @@ class AutoSolveRequest(BaseModel):
     apply_to_camera: bool = True
     force: bool = True
     timestamp_iso: Optional[str] = None
+    solve_distortion: bool = False
 
 
 class StarDetectionRequest(BaseModel):
@@ -357,7 +360,9 @@ def solve_calibration_endpoint(req: SolveCalibrationRequest):
             img_h=req.img_height,
             lens_model=req.lens_model,
             init_extrinsics=init_ext,
-            init_fov=req.init_fov
+            init_fov=req.init_fov,
+            init_k1=req.init_k1 if req.init_k1 is not None else (cam_cfg.intrinsics.k1 if cam_cfg else 0.0),
+            solve_distortion=req.solve_distortion
         )
         return solution
     except Exception as e:
@@ -369,14 +374,15 @@ def auto_solve_calibration_endpoint(req: AutoSolveRequest):
     """
     Autonomous Star Plate Solving endpoint:
     Detects star centroids on camera frame, matches them with catalog stars via observer lat/lon & NTP time,
-    and calculates refined Azimuth, Altitude, Roll, and FOV.
-    Optionally applies new extrinsics directly to camera and active stitcher.
+    and calculates refined Azimuth, Altitude, Roll, FOV, and optional lens distortion (k1).
+    Optionally applies new parameters directly to camera and active stitcher.
     """
     res = auto_calibrator.run_auto_calibration(
         camera_id=req.camera_id,
         force=req.force,
         apply_updates=req.apply_to_camera,
-        timestamp_iso=req.timestamp_iso
+        timestamp_iso=req.timestamp_iso,
+        solve_distortion=req.solve_distortion
     )
     return res
 

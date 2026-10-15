@@ -80,6 +80,7 @@ class AutoCalibrationManager:
         force: bool = False,
         apply_updates: bool = True,
         timestamp_iso: Optional[str] = None,
+        solve_distortion: bool = False,
     ) -> Dict[str, Any]:
         """
         Runs star plate solving for a single camera or all enabled cameras.
@@ -161,6 +162,8 @@ class AutoCalibrationManager:
                     lens_model=cam.intrinsics.lens_model,
                     init_extrinsics=cam.extrinsics,
                     init_fov=cam.intrinsics.fov_deg,
+                    init_k1=cam.intrinsics.k1,
+                    solve_distortion=solve_distortion,
                 )
 
                 if solve_res.get("success"):
@@ -171,14 +174,16 @@ class AutoCalibrationManager:
                     if rms <= auto_cfg.max_rms_error_px and matches >= auto_cfg.min_star_matches:
                         solve_res["applied"] = apply_updates
                         if apply_updates:
-                            # Update camera extrinsics & FOV
+                            # Update camera extrinsics, FOV, and optional lens distortion
                             cam.extrinsics.azimuth_deg = solve_res["azimuth_deg"]
                             cam.extrinsics.altitude_deg = solve_res["altitude_deg"]
                             cam.extrinsics.roll_deg = solve_res["roll_deg"]
                             cam.intrinsics.fov_deg = solve_res["fov_deg"]
+                            if solve_distortion and "k1" in solve_res:
+                                cam.intrinsics.k1 = solve_res["k1"]
                             any_updated = True
                             logger.info(
-                                f"Camera '{cam.id}' auto-calibrated: Az={solve_res['azimuth_deg']:.2f}°, Alt={solve_res['altitude_deg']:.2f}°, Roll={solve_res['roll_deg']:.2f}°, FOV={solve_res['fov_deg']:.2f}°, RMS={rms:.2f}px ({matches} stars)"
+                                f"Camera '{cam.id}' auto-calibrated: Az={solve_res['azimuth_deg']:.2f}°, Alt={solve_res['altitude_deg']:.2f}°, Roll={solve_res['roll_deg']:.2f}°, FOV={solve_res['fov_deg']:.2f}°, k1={solve_res.get('k1', cam.intrinsics.k1):.4f}, RMS={rms:.2f}px ({matches} stars)"
                             )
                     else:
                         solve_res["applied"] = False
