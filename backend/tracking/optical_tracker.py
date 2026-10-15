@@ -148,6 +148,7 @@ class OpticalTrackerEngine:
             _, thresh = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
             contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+            min_elev = getattr(self.config.stitching, "min_elevation_deg", 0.0)
             for cnt in contours:
                 area = cv2.contourArea(cnt)
                 if 4 <= area <= 600:
@@ -155,7 +156,10 @@ class OpticalTrackerEngine:
                     if M["m00"] > 0:
                         cx = M["m10"] / M["m00"]
                         cy = M["m01"] / M["m00"]
-                        detected_centroids.append((cx, cy))
+                        # Filter out static ground objects and traffic below horizon
+                        alt, _ = self.pixel_to_altaz(cx, cy, w, h)
+                        if alt >= min_elev:
+                            detected_centroids.append((cx, cy))
 
         self._prev_frame = blurred
 

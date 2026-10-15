@@ -87,6 +87,9 @@ def get_focal_length_px(intrinsics: CameraIntrinsics, img_w: int, img_h: int) ->
     elif model == LensModelType.FISHEYE_ORTHOGRAPHIC:
         # w = 2 * f * sin(fov / 2)
         f = (dimension / 2.0) / math.sin(fov_rad / 2.0)
+    elif model == LensModelType.PANORAMIC_CYLINDRICAL:
+        # Full horizontal angular breadth: w = f * fov_rad
+        f = dimension / max(1e-5, fov_rad)
     else:
         f = (dimension / 2.0) / math.tan(fov_rad / 2.0)
 
@@ -165,6 +168,20 @@ def project_world_point_to_camera(
         r_d = math.sin(theta)
         px = cx + f * r_d * math.cos(phi)
         py = cy + f * r_d * math.sin(phi)
+
+    elif model == LensModelType.PANORAMIC_CYLINDRICAL:
+        # Full 180°+ panoramic horizontal breadth (Reolink Duo series)
+        az_c = math.atan2(xc, zc)
+        fov_rad = math.radians(intrinsics.fov_deg)
+        if abs(az_c) > (fov_rad / 2.0) + math.radians(8.0):
+            return None
+        d_xz = math.hypot(xc, zc)
+        alt_c = math.atan2(yc, max(d_xz, 1e-12))
+        r2 = az_c * az_c + alt_c * alt_c
+        radial = 1.0 + intrinsics.k1 * r2 + intrinsics.k2 * (r2 * r2)
+        px = cx + f * (az_c * radial)
+        py = cy + f * (math.tan(alt_c) * radial)
+
     else:
         r_d = theta
         px = cx + f * r_d * math.cos(phi)
@@ -191,10 +208,24 @@ def backproject_pixel_to_world_ray(
 
     dx = (px - cx) / f
     dy = (py - cy) / f
+
+    model = intrinsics.lens_model
+    if model == LensModelType.PANORAMIC_CYLINDRICAL:
+        az_c = dx
+        alt_c = math.atan(dy)
+        xc = math.sin(az_c) * math.cos(alt_c)
+        yc = math.sin(alt_c)
+        zc = math.cos(az_c) * math.cos(alt_c)
+        ray_cam = np.array([xc, yc, zc], dtype=np.float64)
+        ray_world = R_c2w @ ray_cam
+        norm = np.linalg.norm(ray_world)
+        if norm > 1e-12:
+            ray_world /= norm
+        return ray_world
+
     r = math.hypot(dx, dy)
     phi = math.atan2(dy, dx)
 
-    model = intrinsics.lens_model
     if model == LensModelType.RECTILINEAR:
         theta = math.atan(r)
     elif model == LensModelType.FISHEYE_EQUIDISTANT:

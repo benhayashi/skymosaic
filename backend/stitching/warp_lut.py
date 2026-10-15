@@ -204,6 +204,17 @@ def compute_camera_remap_lut(
         px = cx + f * r_d * np.cos(phi)
         py = cy + f * r_d * np.sin(phi)
 
+    elif model == LensModelType.PANORAMIC_CYLINDRICAL:
+        # Full 180°+ panoramic horizontal breadth (Reolink Duo series)
+        az_c = np.arctan2(xc, zc)
+        d_xz = np.hypot(xc, zc)
+        alt_c = np.arctan2(yc, np.maximum(d_xz, 1e-6))
+        valid_pts = (zc > -0.2) & (np.abs(az_c) <= np.radians(intrinsics.fov_deg / 2.0 + 8.0))
+        r2 = az_c * az_c + alt_c * alt_c
+        radial = 1.0 + intrinsics.k1 * r2 + intrinsics.k2 * (r2 * r2)
+        px = cx + f * (az_c * radial)
+        py = cy + f * (np.tan(alt_c) * radial)
+
     else:
         r_d = theta
         px = cx + f * r_d * np.cos(phi)
@@ -213,6 +224,14 @@ def compute_camera_remap_lut(
     # Check image boundary bounds and finite values
     is_finite = np.isfinite(px) & np.isfinite(py)
     in_bounds = valid_pts & is_finite & (px >= 0.0) & (px <= (img_w - 1.0)) & (py >= 0.0) & (py <= (img_h - 1.0))
+
+    # Mask out points below configured minimum elevation (ground/horizon cutoff)
+    min_elev = getattr(camera_cfg, "min_elevation_deg", 0.0)
+    if min_elev is not None:
+        # vz_val is sin(altitude) in world topocentric coordinates
+        min_sin_alt = np.sin(np.radians(min_elev))
+        above_horizon = vz_val >= min_sin_alt
+        in_bounds = in_bounds & above_horizon
 
     # Apply polygon obstacle mask if configured
     if len(camera_cfg.polygon_mask) >= 3:

@@ -29,6 +29,7 @@ class CalibrationStudio {
     this.showStars = true;
     this.showConstellations = true;
     this.showStarNames = true;
+    this.showHorizon = true;
     this.showMask = true;
 
     this.initEvents();
@@ -164,6 +165,8 @@ class CalibrationStudio {
     let f;
     if (this.lensModel === 'rectilinear') {
       f = (imgW / 2) / Math.tan(fovRad / 2);
+    } else if (this.lensModel === 'panoramic_cylindrical') {
+      f = imgW / Math.max(1e-4, fovRad);
     } else if (this.lensModel === 'fisheye_equidistant') {
       f = (imgW / 2) / (fovRad / 2);
     } else if (this.lensModel === 'fisheye_equisolid') {
@@ -187,6 +190,15 @@ class CalibrationStudio {
       const radial = 1 + this.k1 * (r_u * r_u);
       px = cx + f * (xc / zc) * radial;
       py = cy + f * (yc / zc) * radial;
+    } else if (this.lensModel === 'panoramic_cylindrical') {
+      const az_c = Math.atan2(xc, zc);
+      if (Math.abs(az_c) > (fovRad / 2 + 0.15)) return null;
+      const d_xz = Math.hypot(xc, zc);
+      const alt_c = Math.atan2(yc, Math.max(d_xz, 1e-9));
+      const r2 = az_c * az_c + alt_c * alt_c;
+      const radial = 1 + this.k1 * r2;
+      px = cx + f * az_c * radial;
+      py = cy + f * Math.tan(alt_c) * radial;
     } else if (this.lensModel === 'fisheye_equidistant') {
       px = cx + f * theta * Math.cos(phi);
       py = cy + f * theta * Math.sin(phi);
@@ -293,7 +305,12 @@ class CalibrationStudio {
       }
     }
 
-    // 6. Draw polygon obstacle mask
+    // 6. Draw 0° Horizon Line (elevation = 0.0°)
+    if (this.showHorizon) {
+      this.renderHorizonLine(w, h);
+    }
+
+    // 7. Draw polygon obstacle mask
     if (this.showMask && this.maskPoints.length > 0) {
       this.ctx.fillStyle = 'rgba(239, 68, 68, 0.28)';
       this.ctx.strokeStyle = '#ef4444';
@@ -319,6 +336,93 @@ class CalibrationStudio {
         this.ctx.fillRect(pt[0] * w - 3, pt[1] * h - 3, 6, 6);
       }
     }
+  }
+
+  renderHorizonLine(w, h) {
+    // Computes topocentric horizon points across 360° azimuth at altitude = 0.0°
+    this.ctx.strokeStyle = '#06b6d4';
+    this.ctx.lineWidth = 2;
+    this.ctx.setLineDash([6, 4]);
+    this.ctx.beginPath();
+
+    let started = false;
+    let lastPt = null;
+
+    for (let azDeg = 0; azDeg <= 360; azDeg += 2) {
+      const azRad = azDeg * (Math.PI / 180);
+      // Unit vector at Alt=0.0°: X=sin(az), Y=cos(az), Z=0.0
+      const vWorld = [Math.sin(azRad), Math.cos(azRad), 0.0];
+      const pt = this.projectWorldToCamera(vWorld, w, h);
+
+      if (pt && pt.x >= -100 && pt.x <= w + 100 && pt.y >= -100 && pt.y <= h + 100) {
+        if (!started) {
+          this.ctx.moveTo(pt.x, pt.y);
+          started = true;
+        } else if (lastPt && Math.hypot(pt.x - lastPt.x, pt.y - lastPt.y) < 250) {
+          this.ctx.lineTo(pt.x, pt.y);
+        } else {
+          this.ctx.moveTo(pt.x, pt.y);
+        }
+        lastPt = pt;
+      } else {
+        lastPt = null;
+      }
+    }
+    this.ctx.stroke();
+    this.ctx.setLineDash([]);
+
+    // Label 0° Horizon
+    if (lastPt) {
+      this.ctx.fillStyle = '#06b6d4';
+      this.ctx.font = '11px JetBrains Mono, monospace';
+      this.ctx.fillText("0° HORIZON", Math.min(w - 90, Math.max(10, lastPt.x)), Math.min(h - 10, Math.max(20, lastPt.y - 8)));
+    }
+  }
+
+  autoMaskGround() {
+    // Automatically creates an obstacle polygon covering everything below 0° elevation
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const pts = [];
+
+    // Scan horizon points along camera field from left to right
+    const horizonCurve = [];
+    for (let azDeg = 0; azDeg <= 360; azDeg += 1) {
+      const azRad = azDeg * (Math.PI / 180);
+      const vWorld = [Math.sin(azRad), Math.cos(azRad), 0.0];
+      const pt = this.projectWorldToCamera(vWorld, w, h);
+      if (pt && pt.x >= -50 && pt.x <= w + 50 && pt.y >= -50 && pt.y <= h + 50) {
+        horizonCurve.push({ x: pt.x / w, y: pt.y / h });
+      }
+    }
+
+    if (horizonCurve.length < 2) {
+      alert("Could not project 0° horizon line on current camera view. Check Azimuth and Altitude orientation.");
+      return;
+    }
+
+    // Sort horizon points by x coordinate
+    horizonCurve.sort((a, b) => a.x - b.x);
+
+    // Build closed polygon: Left-edge bottom -> horizon curve -> Right-edge bottom -> close
+    pts.push([0.0, 1.0]); // bottom-left
+    if (horizonCurve[0].x > 0.0) {
+      pts.push([0.0, horizonCurve[0].y]);
+    }
+
+    for (const hp of horizonCurve) {
+      pts.push([Math.max(0.0, Math.min(1.0, hp.x)), Math.max(0.0, Math.min(1.0, hp.y))]);
+    }
+
+    const last = horizonCurve[horizonCurve.length - 1];
+    if (last.x < 1.0) {
+      pts.push([1.0, last.y]);
+    }
+    pts.push([1.0, 1.0]); // bottom-right
+
+    this.maskPoints = pts;
+    this.polygonMask = [...pts];
+    this.render();
   }
 
   handleCanvasMouseMove(e) {

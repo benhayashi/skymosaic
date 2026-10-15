@@ -12,6 +12,7 @@ class LensModelType(str, Enum):
     FISHEYE_EQUISOLID = "fisheye_equisolid"      # r = 2 * f * sin(theta / 2)
     FISHEYE_STEREOGRAPHIC = "fisheye_stereographic"  # r = 2 * f * tan(theta / 2)
     FISHEYE_ORTHOGRAPHIC = "fisheye_orthographic"    # r = f * sin(theta)
+    PANORAMIC_CYLINDRICAL = "panoramic_cylindrical"  # 180° dual-lens stitched panorama (Reolink Duo, ColorVu Dual, etc.)
 
 
 class CameraSourceType(str, Enum):
@@ -65,6 +66,7 @@ class CameraConfig(BaseModel):
         description="List of [x, y] normalized vertices (0.0 to 1.0) defining masked/ignored areas (ground/obstructions)"
     )
     gain_scale: float = Field(default=1.0, description="Brightness gain multiplier for exposure matching")
+    min_elevation_deg: float = Field(default=0.0, description="Minimum elevation angle in degrees; points below this are masked out (removes ground/roads/cars)")
 
 
 class StitchingConfig(BaseModel):
@@ -73,6 +75,7 @@ class StitchingConfig(BaseModel):
     feather_pixels: int = Field(default=25, description="Overlap feathering width in pixels")
     exposure_balance: bool = Field(default=True, description="Enable automatic cross-camera brightness normalization")
     horizon_mask_radius: float = Field(default=0.98, description="Fraction of radius to clip at dome horizon")
+    min_elevation_deg: float = Field(default=0.0, description="Minimum elevation angle in degrees for dome rendering and tracking")
     overlay_timestamp: bool = Field(default=True, description="Render live timestamp overlay onto final stitched view")
     time_format: str = Field(default="zulu", description="'zulu' (UTC / Z) or 'local' (Observer timezone)")
     ntp_enabled: bool = Field(default=True, description="Synchronize timestamp from Network Time Protocol (NTP)")

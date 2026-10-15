@@ -56,3 +56,23 @@ def test_multi_camera_stitcher_blending():
     assert composite.shape == (300, 300, 3)
     # The canvas should not be entirely black
     assert np.count_nonzero(composite) > 1000
+
+
+def test_min_elevation_masking_in_remap_lut():
+    cfg = get_default_config()
+    grid_vx, grid_vy, grid_vz, valid_mask = generate_target_world_grid(cfg.stitching)
+
+    cam = CameraConfig(
+        id="test_cam",
+        name="Test Cam",
+        min_elevation_deg=10.0,
+        extrinsics=CameraExtrinsics(azimuth_deg=0.0, altitude_deg=45.0, roll_deg=0.0),
+        intrinsics=CameraIntrinsics(lens_model=LensModelType.RECTILINEAR, fov_deg=90.0)
+    )
+
+    map_x, map_y, cam_valid = compute_camera_remap_lut(cam, 640, 480, grid_vx, grid_vy, grid_vz, valid_mask)
+    # At any pixel where cam_valid > 0, the world elevation (sin(alt)=grid_vz) must be >= sin(10 deg)
+    valid_pixels = cam_valid > 0
+    assert np.count_nonzero(valid_pixels) > 0
+    min_sin = np.sin(np.radians(10.0))
+    assert np.all(grid_vz[valid_pixels] >= (min_sin - 1e-4))

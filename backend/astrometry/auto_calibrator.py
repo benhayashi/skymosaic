@@ -154,6 +154,13 @@ class AutoCalibrationManager:
                 continue
 
             try:
+                # Generate obstacle mask if polygon_mask is defined on camera
+                h_f, w_f = frame.shape[:2]
+                obs_mask = None
+                if len(cam.polygon_mask) >= 3:
+                    from backend.stitching.warp_lut import generate_camera_polygon_mask
+                    obs_mask = generate_camera_polygon_mask(cam.polygon_mask, w_f, h_f)
+
                 solve_res = auto_plate_solve_camera(
                     image=frame,
                     dt=dt,
@@ -164,6 +171,8 @@ class AutoCalibrationManager:
                     init_fov=cam.intrinsics.fov_deg,
                     init_k1=cam.intrinsics.k1,
                     solve_distortion=solve_distortion,
+                    obstacle_mask=obs_mask,
+                    min_elevation_deg=getattr(cam, "min_elevation_deg", 0.0)
                 )
 
                 if solve_res.get("success"):

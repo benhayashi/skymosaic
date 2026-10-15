@@ -51,6 +51,7 @@ def test_lens_models_forward_and_backprojection():
         LensModelType.FISHEYE_EQUISOLID,
         LensModelType.FISHEYE_STEREOGRAPHIC,
         LensModelType.FISHEYE_ORTHOGRAPHIC,
+        LensModelType.PANORAMIC_CYLINDRICAL,
     ]
     ext = CameraExtrinsics(azimuth_deg=0.0, altitude_deg=90.0, roll_deg=0.0) # pointing zenith
     R_w2c = build_camera_rotation_matrix(ext)

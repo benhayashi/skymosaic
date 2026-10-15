@@ -23,10 +23,12 @@ def detect_star_centroids(
     min_area: int = 2,
     max_area: int = 150,
     threshold_percentile: float = 98.5,
-    max_stars: int = 50
+    max_stars: int = 50,
+    mask: Optional[np.ndarray] = None
 ) -> List[Dict]:
     """
     Detects bright star peaks and centroids in a night sky image with sub-pixel precision.
+    Optional mask (255 = sky, 0 = obstacle/ground) excludes ground lights and car headlights.
     Returns list of dicts with 'x', 'y', 'brightness', 'area'.
     """
     if len(image.shape) == 3:
@@ -42,6 +44,8 @@ def detect_star_centroids(
     thresh_val = max(thresh_val, 25.0)  # Don't trigger on pitch black
 
     _, binary = cv2.threshold(blurred, thresh_val, 255, cv2.THRESH_BINARY)
+    if mask is not None:
+        binary = cv2.bitwise_and(binary, mask)
 
     # Connected components
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
@@ -242,17 +246,19 @@ def auto_plate_solve_camera(
     init_fov: Optional[float] = None,
     init_k1: Optional[float] = None,
     solve_distortion: bool = False,
-    max_search_dist_px: float = 80.0
+    max_search_dist_px: float = 80.0,
+    obstacle_mask: Optional[np.ndarray] = None,
+    min_elevation_deg: float = 0.0
 ) -> Dict:
     """
     Autonomous Star Plate Solver:
-    1. Detects star centroids on camera frame.
-    2. Projects visible catalogue stars using observer lat/lon, NTP datetime, and estimated/prior pose.
+    1. Detects star centroids on camera frame (optionally masked against ground/obstacles).
+    2. Projects visible catalogue stars above min_elevation_deg using observer lat/lon, NTP datetime, and estimated/prior pose.
     3. Solves optimal assignment (Hungarian / nearest mutual distance) between detected centroids and catalog stars.
     4. Runs non-linear optimization to solve refined Azimuth, Altitude, Roll, and FOV.
     """
     h, w = image.shape[:2]
-    detected_stars = detect_star_centroids(image, min_area=2, max_stars=35)
+    detected_stars = detect_star_centroids(image, min_area=2, max_stars=35, mask=obstacle_mask)
     if len(detected_stars) < 2:
         return {
             "success": False,
@@ -274,7 +280,7 @@ def auto_plate_solve_camera(
 
     for star in BRIGHT_STARS:
         alt, az = radec_to_altaz(star["ra"], star["dec"], lat_deg, lst_deg)
-        if alt < -2.0:
+        if alt < (min_elevation_deg - 1.0):
             continue
         v_world = altaz_to_unit_vector(alt, az)
         proj = project_world_point_to_camera(v_world, R_w2c_prior, intr_prior, w, h)

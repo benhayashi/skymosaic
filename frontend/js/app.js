@@ -409,6 +409,10 @@ function initCalibrationEvents() {
     calibrationStudio.showStarNames = e.target.checked;
     calibrationStudio.render();
   });
+  document.getElementById('calib-toggle-horizon')?.addEventListener('change', (e) => {
+    calibrationStudio.showHorizon = e.target.checked;
+    calibrationStudio.render();
+  });
   document.getElementById('calib-toggle-mask')?.addEventListener('change', (e) => {
     calibrationStudio.showMask = e.target.checked;
     calibrationStudio.render();
@@ -443,7 +447,12 @@ function initCalibrationEvents() {
     await calibrationStudio.autoPlateSolve();
   });
 
-  // Mask drawing
+  // Mask drawing & auto ground mask
+  document.getElementById('btn-auto-mask-ground')?.addEventListener('click', () => {
+    calibrationStudio.autoMaskGround();
+    showToast('Sub-horizon ground (&lt;0° Alt) masked', 'info');
+  });
+
   document.getElementById('btn-start-mask')?.addEventListener('click', (e) => {
     calibrationStudio.isDrawingMask = !calibrationStudio.isDrawingMask;
     e.target.textContent = calibrationStudio.isDrawingMask ? 'Finish Mask' : 'Draw Mask';
