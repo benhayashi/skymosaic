@@ -35,7 +35,7 @@ class CompositeWorker:
         self._clean_time = 0.0
         self._generation = 0
         self._jpeg_cache: Dict[Tuple[bool, int], bytes] = {}
-        self._targets: Dict[str, Any] = {"targets": [], "targets_count": 0, "unidentified_count": 0, "stale": True}
+        self._targets: Dict[str, Any] = {"targets": [], "targets_count": 0, "unidentified_count": 0, "weather": {}, "stale": True}
         self._targets_time = 0.0
         self._running = False
         self._thread: Optional[threading.Thread] = None

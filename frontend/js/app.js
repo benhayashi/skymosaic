@@ -459,6 +459,11 @@ function initCalibrationEvents() {
     await calibrationStudio.autoPlateSolve();
   });
 
+  // AI Vision Auto-Mask
+  document.getElementById('btn-auto-mask-ai')?.addEventListener('click', async () => {
+    await calibrationStudio.autoMaskAI();
+  });
+
   // Mask drawing, auto-detection & auto ground mask
   document.getElementById('btn-auto-detect-obstacles')?.addEventListener('click', async () => {
     await calibrationStudio.autoDetectObstacles();
@@ -466,17 +471,77 @@ function initCalibrationEvents() {
 
   document.getElementById('btn-auto-mask-ground')?.addEventListener('click', () => {
     calibrationStudio.autoMaskGround();
-    showToast('Sub-horizon ground (&lt;0° Alt) added as obstacle', 'info');
+    showToast('Sub-horizon ground (<0° Alt) added as obstacle', 'info');
   });
 
-  document.getElementById('btn-start-mask')?.addEventListener('click', (e) => {
+  // Manual Mask Tools: Brush, Eraser, Polygon
+  const btnBrush = document.getElementById('btn-mask-tool-brush');
+  const btnEraser = document.getElementById('btn-mask-tool-eraser');
+  const btnPoly = document.getElementById('btn-start-mask');
+  const sliderBrushSize = document.getElementById('slider-brush-size');
+  const labelBrushSize = document.getElementById('label-brush-size');
+
+  function updateMaskToolButtons(activeMode) {
+    if (btnBrush) {
+      if (activeMode === 'brush') {
+        btnBrush.classList.replace('btn-secondary', 'btn-primary');
+      } else {
+        btnBrush.classList.replace('btn-primary', 'btn-secondary');
+      }
+    }
+    if (btnEraser) {
+      if (activeMode === 'eraser') {
+        btnEraser.classList.replace('btn-secondary', 'btn-primary');
+      } else {
+        btnEraser.classList.replace('btn-primary', 'btn-secondary');
+      }
+    }
+    if (btnPoly) {
+      if (activeMode === 'polygon') {
+        btnPoly.classList.replace('btn-secondary', 'btn-primary');
+      } else {
+        btnPoly.classList.replace('btn-primary', 'btn-secondary');
+        btnPoly.textContent = '📐 Polygon';
+      }
+    }
+  }
+
+  btnBrush?.addEventListener('click', () => {
+    if (calibrationStudio.maskToolMode === 'brush') {
+      calibrationStudio.setMaskTool('none');
+      updateMaskToolButtons('none');
+      showToast('Brush deactivated', 'info');
+    } else {
+      calibrationStudio.setMaskTool('brush');
+      updateMaskToolButtons('brush');
+      showToast('Brush active: Paint over trees/poles in viewport', 'info');
+    }
+  });
+
+  btnEraser?.addEventListener('click', () => {
+    if (calibrationStudio.maskToolMode === 'eraser') {
+      calibrationStudio.setMaskTool('none');
+      updateMaskToolButtons('none');
+      showToast('Eraser deactivated', 'info');
+    } else {
+      calibrationStudio.setMaskTool('eraser');
+      updateMaskToolButtons('eraser');
+      showToast('Eraser active: Drag over painted areas to erase', 'info');
+    }
+  });
+
+  sliderBrushSize?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value, 10) || 25;
+    if (labelBrushSize) labelBrushSize.textContent = `${val}px`;
+    calibrationStudio.setBrushSize(val);
+  });
+
+  btnPoly?.addEventListener('click', (e) => {
     if (!calibrationStudio.isDrawingMask) {
-      calibrationStudio.isDrawingMask = true;
-      calibrationStudio.drawingObstaclePoints = [];
+      calibrationStudio.setMaskTool('polygon');
+      updateMaskToolButtons('polygon');
       e.target.textContent = 'Finish Obstacle';
-      e.target.classList.replace('btn-secondary', 'btn-primary');
       showToast('Click points around obstacle in viewport', 'info');
-      calibrationStudio.render();
     } else {
       if (calibrationStudio.drawingObstaclePoints.length >= 3) {
         calibrationStudio.obstacles.push({
@@ -488,10 +553,8 @@ function initCalibrationEvents() {
       } else if (calibrationStudio.drawingObstaclePoints.length > 0) {
         showToast('Obstacle requires at least 3 points', 'warning');
       }
-      calibrationStudio.isDrawingMask = false;
-      calibrationStudio.drawingObstaclePoints = [];
-      e.target.textContent = '+ Draw Obstacle';
-      e.target.classList.replace('btn-primary', 'btn-secondary');
+      calibrationStudio.setMaskTool('none');
+      updateMaskToolButtons('none');
       calibrationStudio.renderObstacleList();
       calibrationStudio.render();
     }
@@ -500,11 +563,10 @@ function initCalibrationEvents() {
   document.getElementById('btn-clear-mask')?.addEventListener('click', () => {
     calibrationStudio.obstacles = [];
     calibrationStudio.drawingObstaclePoints = [];
-    calibrationStudio.isDrawingMask = false;
-    const btn = document.getElementById('btn-start-mask');
-    if (btn) {
-      btn.textContent = '+ Draw Obstacle';
-      btn.classList.replace('btn-primary', 'btn-secondary');
+    calibrationStudio.setMaskTool('none');
+    updateMaskToolButtons('none');
+    if (calibrationStudio.brushCanvas && calibrationStudio.brushCtx) {
+      calibrationStudio.brushCtx.clearRect(0, 0, calibrationStudio.brushCanvas.width, calibrationStudio.brushCanvas.height);
     }
     calibrationStudio.renderObstacleList();
     calibrationStudio.render();
@@ -1208,10 +1270,25 @@ function populateSettingsForm() {
     document.getElementById('set-autocalib-max-rms').value = autoCalib.max_rms_error_px ?? 8.0;
   }
 
+  const aiMask = appConfig.plugins?.vision_masking || appConfig.ai_plugins?.vision_masking;
+  if (aiMask) {
+    const elEnabled = document.getElementById('set-ai-mask-enabled');
+    if (elEnabled) elEnabled.checked = aiMask.enabled !== false;
+    const elProvider = document.getElementById('set-ai-mask-provider');
+    if (elProvider) elProvider.value = aiMask.provider || 'ollama';
+    const elUrl = document.getElementById('set-ai-mask-url');
+    if (elUrl) elUrl.value = aiMask.api_url || 'http://localhost:11434';
+    const elModel = document.getElementById('set-ai-mask-model');
+    if (elModel) elModel.value = aiMask.model || 'llama3.2-vision';
+    const elKey = document.getElementById('set-ai-mask-key');
+    if (elKey) elKey.value = aiMask.api_key || '';
+  }
+
   fetchStorageStatus();
   fetchADSBStatus();
   fetchNTPStatus();
   fetchAutoCalibStatus();
+  fetchAIVisionStatus();
 }
 
 async function fetchAutoCalibStatus() {
@@ -1452,6 +1529,13 @@ function initSettingsEvents() {
     appConfig.plugins.auto_calibration.min_star_matches = parseInt(document.getElementById('set-autocalib-min-stars').value) || 3;
     appConfig.plugins.auto_calibration.max_rms_error_px = parseFloat(document.getElementById('set-autocalib-max-rms').value) || 8.0;
 
+    if (!appConfig.plugins.vision_masking) appConfig.plugins.vision_masking = {};
+    appConfig.plugins.vision_masking.enabled = document.getElementById('set-ai-mask-enabled')?.checked ?? true;
+    appConfig.plugins.vision_masking.provider = document.getElementById('set-ai-mask-provider')?.value || 'ollama';
+    appConfig.plugins.vision_masking.api_url = document.getElementById('set-ai-mask-url')?.value.trim() || 'http://localhost:11434';
+    appConfig.plugins.vision_masking.model = document.getElementById('set-ai-mask-model')?.value.trim() || 'llama3.2-vision';
+    appConfig.plugins.vision_masking.api_key = document.getElementById('set-ai-mask-key')?.value.trim() || null;
+
     try {
       const res = await fetch('/api/config', {
         method: 'POST',
@@ -1466,6 +1550,7 @@ function initSettingsEvents() {
         fetchADSBStatus();
         fetchNTPStatus();
         fetchAutoCalibStatus();
+        fetchAIVisionStatus();
       }
     } catch (e) {
       showToast('Failed to save settings', 'error');
@@ -1554,6 +1639,90 @@ function initSettingsEvents() {
       showToast('Network error testing ADS-B connection', 'error');
     }
   });
+
+  document.getElementById('btn-test-ai-connection')?.addEventListener('click', async () => {
+    const provider = document.getElementById('set-ai-mask-provider')?.value || 'ollama';
+    const apiUrl = document.getElementById('set-ai-mask-url')?.value.trim() || 'http://localhost:11434';
+    const apiKey = document.getElementById('set-ai-mask-key')?.value.trim() || null;
+    const resultEl = document.getElementById('ai-test-result');
+    const badge = document.getElementById('ai-vision-status-badge');
+
+    if (resultEl) resultEl.innerHTML = 'Testing connection to AI model server...';
+    if (badge) badge.textContent = 'Testing...';
+
+    try {
+      const res = await fetch('/api/ai/test_connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: provider,
+          api_url: apiUrl,
+          api_key: apiKey
+        })
+      });
+      const data = await res.json();
+      if (data.reachable) {
+        showToast(`AI Server connected! (${data.provider})`, 'success');
+        if (badge) {
+          badge.textContent = `Online: ${data.provider}`;
+          badge.style.color = 'var(--accent-success)';
+          badge.style.borderColor = 'var(--accent-success)';
+        }
+        if (resultEl) {
+          let extra = '';
+          if (data.models && data.models.length > 0) {
+            extra = ` Available models: ${data.models.slice(0, 5).join(', ')}`;
+          }
+          resultEl.innerHTML = `<span style="color:var(--accent-success);">${data.message || 'Connected successfully.'}${extra}</span>`;
+        }
+      } else {
+        showToast(`AI Server error: ${data.error || 'Server unreachable'}`, 'error');
+        if (badge) {
+          badge.textContent = 'Offline / Unreachable';
+          badge.style.color = 'var(--accent-danger)';
+          badge.style.borderColor = 'var(--accent-danger)';
+        }
+        if (resultEl) {
+          resultEl.innerHTML = `<span style="color:var(--accent-danger);">${data.error || 'Failed to connect'}</span>`;
+        }
+      }
+    } catch (e) {
+      showToast(`Network error testing AI connection: ${e.message}`, 'error');
+      if (resultEl) resultEl.innerHTML = `<span style="color:var(--accent-danger);">${e.message}</span>`;
+    }
+  });
+}
+
+async function fetchAIVisionStatus() {
+  const badge = document.getElementById('ai-vision-status-badge');
+  const resultEl = document.getElementById('ai-test-result');
+  if (!badge) return;
+
+  try {
+    const res = await fetch('/api/ai/test_connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.reachable) {
+        badge.textContent = `Online (${data.provider})`;
+        badge.style.color = 'var(--accent-success)';
+        badge.style.borderColor = 'var(--accent-success)';
+        if (resultEl && !resultEl.textContent) {
+          resultEl.innerHTML = `<span style="color:var(--text-secondary);">${data.message || 'Ready'}</span>`;
+        }
+      } else {
+        badge.textContent = 'Server Offline';
+        badge.style.color = 'var(--text-dim)';
+        badge.style.borderColor = 'var(--border-color)';
+      }
+    }
+  } catch (_) {
+    badge.textContent = 'Server Offline';
+    badge.style.color = 'var(--text-dim)';
+  }
 }
 
 // Add Camera Modal

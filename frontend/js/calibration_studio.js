@@ -27,6 +27,14 @@ class CalibrationStudio {
     this.obstacles = []; // [{id, label, points: [[x,y],...]}]
     this.maskTrackingOnly = true;
 
+    // Brush Tool state
+    this.maskToolMode = 'none'; // 'none', 'polygon', 'brush', 'eraser'
+    this.brushSize = 25;
+    this.isBrushing = false;
+    this.lastBrushPos = null;
+    this.brushCanvas = document.createElement('canvas');
+    this.brushCtx = this.brushCanvas.getContext('2d');
+
     // Toggles
     this.showStars = true;
     this.showConstellations = true;
@@ -40,13 +48,63 @@ class CalibrationStudio {
   initEvents() {
     this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
     this.canvas.addEventListener('mousemove', (e) => this.handleCanvasMouseMove(e));
+    this.canvas.addEventListener('mousedown', (e) => this.handleCanvasMouseDown(e));
+    window.addEventListener('mouseup', () => this.handleCanvasMouseUp());
+
+    // Touch support for brush drawing
+    this.canvas.addEventListener('touchstart', (e) => {
+      if (this.maskToolMode === 'brush' || this.maskToolMode === 'eraser') {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const mouseEv = new MouseEvent('mousedown', { clientX: touch.clientX, clientY: touch.clientY, button: 0 });
+        this.handleCanvasMouseDown(mouseEv);
+      }
+    }, { passive: false });
+
+    this.canvas.addEventListener('touchmove', (e) => {
+      if (this.maskToolMode === 'brush' || this.maskToolMode === 'eraser') {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const mouseEv = new MouseEvent('mousemove', { clientX: touch.clientX, clientY: touch.clientY });
+        this.handleCanvasMouseMove(mouseEv);
+      }
+    }, { passive: false });
+
+    this.canvas.addEventListener('touchend', () => {
+      this.handleCanvasMouseUp();
+    }, { passive: true });
 
     this.testImage.onload = () => {
       this.hasImage = true;
       this.canvas.width = this.testImage.naturalWidth || 1280;
       this.canvas.height = this.testImage.naturalHeight || 720;
+      this.brushCanvas.width = this.canvas.width;
+      this.brushCanvas.height = this.canvas.height;
+      this.syncObstaclesToBrushCanvas();
       this.render();
     };
+  }
+
+  syncObstaclesToBrushCanvas() {
+    if (!this.brushCanvas.width || !this.brushCanvas.height) return;
+    const w = this.brushCanvas.width;
+    const h = this.brushCanvas.height;
+    this.brushCtx.clearRect(0, 0, w, h);
+    this.brushCtx.fillStyle = '#ffffff';
+
+    for (const obs of this.obstacles) {
+      if (obs.points && obs.points.length >= 3) {
+        this.brushCtx.beginPath();
+        for (let i = 0; i < obs.points.length; i++) {
+          const px = obs.points[i][0] * w;
+          const py = obs.points[i][1] * h;
+          if (i === 0) this.brushCtx.moveTo(px, py);
+          else this.brushCtx.lineTo(px, py);
+        }
+        this.brushCtx.closePath();
+        this.brushCtx.fill();
+      }
+    }
   }
 
   setCamera(camera) {
@@ -85,6 +143,7 @@ class CalibrationStudio {
     const chk = document.getElementById('calib-mask-tracking-only');
     if (chk) chk.checked = this.maskTrackingOnly;
 
+    this.syncObstaclesToBrushCanvas();
     this.updateControlsUI();
     this.renderObstacleList();
     this.loadCameraTestFrame(camera.id);
@@ -377,30 +436,282 @@ class CalibrationStudio {
         }
       });
 
-      // Draw active in-progress drawing points
-      if (this.isDrawingMask && this.drawingObstaclePoints.length > 0) {
-        this.ctx.strokeStyle = '#38bdf8';
-        this.ctx.lineWidth = 2;
-        this.ctx.setLineDash([4, 4]);
-        this.ctx.beginPath();
-
-        for (let i = 0; i < this.drawingObstaclePoints.length; i++) {
-          const pt = this.drawingObstaclePoints[i];
-          const px = pt[0] * w;
-          const py = pt[1] * h;
-          if (i === 0) this.ctx.moveTo(px, py);
-          else this.ctx.lineTo(px, py);
-        }
-        this.ctx.stroke();
-        this.ctx.setLineDash([]);
-
-        // Vertices
-        this.ctx.fillStyle = '#38bdf8';
-        for (const pt of this.drawingObstaclePoints) {
+        // Draw active in-progress drawing points
+        if (this.isDrawingMask && this.drawingObstaclePoints.length > 0) {
+          this.ctx.strokeStyle = '#38bdf8';
+          this.ctx.lineWidth = 2;
+          this.ctx.setLineDash([4, 4]);
           this.ctx.beginPath();
-          this.ctx.arc(pt[0] * w, pt[1] * h, 4, 0, 2 * Math.PI);
-          this.ctx.fill();
+
+          for (let i = 0; i < this.drawingObstaclePoints.length; i++) {
+            const pt = this.drawingObstaclePoints[i];
+            const px = pt[0] * w;
+            const py = pt[1] * h;
+            if (i === 0) this.ctx.moveTo(px, py);
+            else this.ctx.lineTo(px, py);
+          }
+          this.ctx.stroke();
+          this.ctx.setLineDash([]);
+
+          // Vertices
+          this.ctx.fillStyle = '#38bdf8';
+          for (const pt of this.drawingObstaclePoints) {
+            this.ctx.beginPath();
+            this.ctx.arc(pt[0] * w, pt[1] * h, 4, 0, 2 * Math.PI);
+            this.ctx.fill();
+          }
         }
+
+        // Draw brush preview indicator when in brush or eraser mode
+        if (this.lastBrushPos && (this.maskToolMode === 'brush' || this.maskToolMode === 'eraser')) {
+          this.ctx.save();
+          this.ctx.beginPath();
+          this.ctx.arc(this.lastBrushPos.x, this.lastBrushPos.y, this.brushSize, 0, 2 * Math.PI);
+          this.ctx.strokeStyle = this.maskToolMode === 'brush' ? '#f59e0b' : '#38bdf8';
+          this.ctx.lineWidth = 2;
+          this.ctx.setLineDash([3, 3]);
+          this.ctx.stroke();
+          this.ctx.restore();
+        }
+      }
+    }
+
+  setMaskTool(mode) {
+    this.maskToolMode = mode;
+    this.isDrawingMask = (mode === 'polygon');
+    this.drawingObstaclePoints = [];
+    if (this.canvas) {
+      if (mode === 'brush' || mode === 'eraser') {
+        this.canvas.style.cursor = 'crosshair';
+      } else if (mode === 'polygon') {
+        this.canvas.style.cursor = 'cell';
+      } else {
+        this.canvas.style.cursor = 'default';
+      }
+    }
+    this.render();
+  }
+
+  setBrushSize(sz) {
+    this.brushSize = Math.max(5, Math.min(120, parseInt(sz, 10) || 25));
+  }
+
+  handleCanvasMouseDown(e) {
+    if (this.maskToolMode !== 'brush' && this.maskToolMode !== 'eraser') return;
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+
+    this.isBrushing = true;
+    this.lastBrushPos = { x, y };
+    this.paintBrushStroke(x, y);
+    this.render();
+  }
+
+  paintBrushStroke(x, y) {
+    if (!this.brushCanvas.width) return;
+    this.brushCtx.save();
+    if (this.maskToolMode === 'eraser') {
+      this.brushCtx.globalCompositeOperation = 'destination-out';
+      this.brushCtx.fillStyle = '#000000';
+      this.brushCtx.strokeStyle = '#000000';
+    } else {
+      this.brushCtx.globalCompositeOperation = 'source-over';
+      this.brushCtx.fillStyle = '#ffffff';
+      this.brushCtx.strokeStyle = '#ffffff';
+    }
+
+    this.brushCtx.lineWidth = this.brushSize * 2;
+    this.brushCtx.lineCap = 'round';
+    this.brushCtx.lineJoin = 'round';
+
+    this.brushCtx.beginPath();
+    if (this.lastBrushPos) {
+      this.brushCtx.moveTo(this.lastBrushPos.x, this.lastBrushPos.y);
+      this.brushCtx.lineTo(x, y);
+      this.brushCtx.stroke();
+    }
+    this.brushCtx.beginPath();
+    this.brushCtx.arc(x, y, this.brushSize, 0, 2 * Math.PI);
+    this.brushCtx.fill();
+    this.brushCtx.restore();
+
+    this.lastBrushPos = { x, y };
+  }
+
+  handleCanvasMouseUp() {
+    if (this.isBrushing) {
+      this.isBrushing = false;
+      this.convertBrushToPolygons();
+    }
+  }
+
+  convertBrushToPolygons() {
+    const w = this.brushCanvas.width;
+    const h = this.brushCanvas.height;
+    if (!w || !h) return;
+
+    try {
+      const imgData = this.brushCtx.getImageData(0, 0, w, h);
+      const data = imgData.data;
+
+      // Extract binary single-channel alpha/luminance buffer for simple contour tracing
+      // Scale down image to 400px width for fast polygon extraction
+      const scale = Math.min(1.0, 480.0 / w);
+      const sw = Math.round(w * scale);
+      const sh = Math.round(h * scale);
+
+      const smallCanvas = document.createElement('canvas');
+      smallCanvas.width = sw;
+      smallCanvas.height = sh;
+      const sctx = smallCanvas.getContext('2d');
+      sctx.drawImage(this.brushCanvas, 0, 0, sw, sh);
+      const sData = sctx.getImageData(0, 0, sw, sh).data;
+
+      // Trace non-zero alpha bounding components into bounding polygon approximations
+      // Simple grid-box cluster contour approximation:
+      const grid = 8;
+      const cols = Math.ceil(sw / grid);
+      const rows = Math.ceil(sh / grid);
+      const occupied = new Uint8Array(cols * rows);
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          let count = 0;
+          for (let gy = 0; gy < grid; gy++) {
+            const py = r * grid + gy;
+            if (py >= sh) break;
+            for (let gx = 0; gx < grid; gx++) {
+              const px = c * grid + gx;
+              if (px >= sw) break;
+              const idx = (py * sw + px) * 4;
+              if (sData[idx + 3] > 60) count++;
+            }
+          }
+          if (count > (grid * grid * 0.25)) {
+            occupied[r * cols + c] = 1;
+          }
+        }
+      }
+
+      // Find bounding segments of occupied blocks
+      const visited = new Uint8Array(cols * rows);
+      const clusters = [];
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const idx = r * cols + c;
+          if (occupied[idx] && !visited[idx]) {
+            // Flood fill cluster
+            const queue = [[r, c]];
+            visited[idx] = 1;
+            let minR = r, maxR = r, minC = c, maxC = c;
+            const pts = [];
+
+            while (queue.length > 0) {
+              const [cr, cc] = queue.shift();
+              minR = Math.min(minR, cr);
+              maxR = Math.max(maxR, cr);
+              minC = Math.min(minC, cc);
+              maxC = Math.max(maxC, cc);
+
+              const neighbors = [[cr - 1, cc], [cr + 1, cc], [cr, cc - 1], [cr, cc + 1]];
+              for (const [nr, nc] of neighbors) {
+                if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+                  const nidx = nr * cols + nc;
+                  if (occupied[nidx] && !visited[nidx]) {
+                    visited[nidx] = 1;
+                    queue.push([nr, nc]);
+                  }
+                }
+              }
+            }
+
+            // Create coarse convex polygon box from cluster
+            const normX1 = Math.round(((minC * grid) / sw) * 10000) / 10000;
+            const normY1 = Math.round(((minR * grid) / sh) * 10000) / 10000;
+            const normX2 = Math.round((Math.min(sw, (maxC + 1) * grid) / sw) * 10000) / 10000;
+            const normY2 = Math.round((Math.min(sh, (maxR + 1) * grid) / sh) * 10000) / 10000;
+
+            clusters.push([
+              [normX1, normY1],
+              [normX2, normY1],
+              [normX2, normY2],
+              [normX1, normY2]
+            ]);
+          }
+        }
+      }
+
+      if (clusters.length > 0) {
+        // Replace previous brush-based obstacles or append
+        this.obstacles = this.obstacles.filter(o => !o.id.startsWith('brush_'));
+        clusters.forEach((poly, i) => {
+          this.obstacles.push({
+            id: `brush_${Date.now()}_${i + 1}`,
+            label: `Brush Obstacle #${i + 1}`,
+            points: poly
+          });
+        });
+        this.renderObstacleList();
+      }
+    } catch (e) {
+      console.warn("Failed to extract polygons from brush canvas:", e);
+    }
+    this.render();
+  }
+
+  async autoMaskAI() {
+    if (!this.activeCamera) return;
+    const btn = document.getElementById('btn-auto-mask-ai');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '🤖 Solving AI Mask...';
+    }
+
+    try {
+      const res = await fetch(`/api/cameras/${this.activeCamera.id}/auto_mask_ai`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'AI vision masking failed');
+      }
+      const data = await res.json();
+      if (!data.obstacles || data.obstacles.length === 0) {
+        if (window.showToast) {
+          showToast('AI found no foreground obstacles in field of view.', 'info');
+        } else {
+          alert('AI found no foreground obstacles in field of view.');
+        }
+        return;
+      }
+
+      data.obstacles.forEach((obs, idx) => {
+        this.obstacles.push({
+          id: `ai_${Date.now()}_${idx}`,
+          label: obs.label || `AI Obstacle #${this.obstacles.length + 1}`,
+          points: obs.polygon
+        });
+      });
+
+      this.syncObstaclesToBrushCanvas();
+      this.renderObstacleList();
+      this.render();
+      if (window.showToast) {
+        showToast(`AI auto-detected ${data.obstacles.length} obstacle(s) (${data.model})`, 'success');
+      }
+    } catch (e) {
+      if (window.showToast) {
+        showToast(`AI Masking Error: ${e.message}`, 'error');
+      } else {
+        alert(`AI Masking Error: ${e.message}`);
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = orig;
       }
     }
   }
@@ -606,6 +917,14 @@ class CalibrationStudio {
     const tooltip = document.getElementById('calib-coords-tooltip');
     if (tooltip) {
       tooltip.textContent = `X: ${x}, Y: ${y}`;
+    }
+
+    if (this.maskToolMode === 'brush' || this.maskToolMode === 'eraser') {
+      this.lastBrushPos = { x, y };
+      if (this.isBrushing) {
+        this.paintBrushStroke(x, y);
+      }
+      this.render();
     }
   }
 

@@ -386,24 +386,53 @@
           </div>
 
           <div class="card">
-            <h3 class="card-title">Horizon & Obstacle Masking</h3>
-            <p class="card-caption">Define tall trees, light posts, utility poles, and ground obstacles to eliminate false motion detections and star matching errors.</p>
+            <h3 class="card-title">Camera Masking Studio & Obstacles</h3>
+            <p class="card-caption">Draw or brush over stationary obstacles (trees, light posts, utility poles, buildings) to prevent false motion detections.</p>
+
+            <!-- Auto Masking Options: AI Vision vs Contrast vs Ground -->
             <div class="button-row" style="margin-bottom: 8px;">
-              <button id="btn-auto-detect-obstacles" class="btn btn-outline btn-sm" style="color:var(--accent-emerald);border-color:var(--accent-emerald); font-weight: 600;">
-                🌲 Auto-Detect Obstacles
-              </button>
-              <button id="btn-auto-mask-ground" class="btn btn-outline btn-sm" style="color:var(--accent-cyan);border-color:var(--accent-cyan);">
-                🚫 Auto-Mask Ground (&lt;0°)
+              <button id="btn-auto-mask-ai" class="btn btn-primary btn-sm" style="flex: 1; font-weight: 600;" title="Uses Ollama, LM Studio, or Cloud Vision AI to detect trees and poles">
+                🤖 AI Vision Auto-Mask
               </button>
             </div>
             <div class="button-row" style="margin-bottom: 8px;">
-              <button id="btn-start-mask" class="btn btn-secondary btn-sm">+ Draw Obstacle</button>
-              <button id="btn-clear-mask" class="btn btn-outline btn-sm">Clear All</button>
+              <button id="btn-auto-detect-obstacles" class="btn btn-outline btn-sm" style="color:var(--accent-emerald);border-color:var(--accent-emerald); font-weight: 500;">
+                🌲 Contrast Auto-Detect
+              </button>
+              <button id="btn-auto-mask-ground" class="btn btn-outline btn-sm" style="color:var(--accent-cyan);border-color:var(--accent-cyan);">
+                🚫 Ground (&lt;0°)
+              </button>
+            </div>
+
+            <!-- Manual Drawing Tools: Brush, Eraser, Polygon -->
+            <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 8px; margin-bottom: 8px;">
+              <div style="font-size:0.78rem; font-weight:600; color:var(--text-bright); margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+                <span>Manual Mask Tools</span>
+                <span id="label-brush-size" style="color:var(--accent-cyan); font-family:var(--font-mono);">25px</span>
+              </div>
+              <div class="button-row" style="margin-bottom: 6px;">
+                <button type="button" id="btn-mask-tool-brush" class="btn btn-secondary btn-sm" title="Click and drag over camera image to paint mask">
+                  🖌️ Brush
+                </button>
+                <button type="button" id="btn-mask-tool-eraser" class="btn btn-secondary btn-sm" title="Erase mask strokes">
+                  🧹 Eraser
+                </button>
+                <button type="button" id="btn-start-mask" class="btn btn-secondary btn-sm" title="Click points around geometric obstacles">
+                  📐 Polygon
+                </button>
+                <button type="button" id="btn-clear-mask" class="btn btn-outline btn-sm" title="Clear all obstacle masks">
+                  Clear All
+                </button>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <label for="slider-brush-size" style="font-size:0.75rem; color:var(--text-dim); white-space:nowrap;">Size:</label>
+                <input type="range" id="slider-brush-size" min="5" max="100" value="25" style="width:100%; accent-color:var(--accent-cyan); cursor:pointer;">
+              </div>
             </div>
 
             <!-- Obstacle List -->
-            <div id="obstacle-list-container" class="obstacle-list" style="max-height: 140px; overflow-y: auto; margin-bottom: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 4px; background: rgba(0,0,0,0.25);">
-              <div style="color: var(--text-dim); font-size: 0.8rem; padding: 4px;">No obstacles configured yet. Click "+ Draw Obstacle" or "Auto-Detect".</div>
+            <div id="obstacle-list-container" class="obstacle-list" style="max-height: 120px; overflow-y: auto; margin-bottom: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 4px; background: rgba(0,0,0,0.25);">
+              <div style="color: var(--text-dim); font-size: 0.8rem; padding: 4px;">No obstacles configured yet. Use Brush, Polygon, or AI Auto-Mask.</div>
             </div>
 
             <!-- Masking Processing Option -->
@@ -904,7 +933,67 @@
             </div>
           </div>
 
-          <div id="autocalib-status-details" style="margin-top:12px;font-size:0.85rem;color:var(--text-dim);font-family:var(--font-mono);"></div>
+        <div class="card settings-card">
+          <div class="section-title-row">
+            <h2>Local AI & Cloud Vision Model Server (Ollama / LM Studio)</h2>
+            <div id="ai-vision-status-badge" class="badge-pill" style="background:var(--bg-surface-elevated);border:1px solid var(--border-color);">Checking...</div>
+          </div>
+          <p class="card-caption">
+            Connect SkyMosaic to a local AI server running <strong>Ollama</strong> or <strong>LM Studio</strong> (or cloud OpenAI-compatible Vision API) to automatically detect trees, branches, utility poles, antennas, and stationary foreground obstructions in individual camera feeds.
+          </p>
+
+          <div class="form-row">
+            <div class="form-group col-4">
+              <label for="set-ai-mask-provider">AI Provider / Server Type</label>
+              <select id="set-ai-mask-provider" class="form-control">
+                <option value="ollama" selected>Ollama (Local LLM Server, port 11434)</option>
+                <option value="lmstudio">LM Studio (Local Server, port 1234)</option>
+                <option value="openai_compatible">OpenAI-Compatible / Cloud Vision API</option>
+              </select>
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">
+                Ollama uses native <code>/api/generate</code>. LM Studio & Cloud use <code>/v1/chat/completions</code>.
+              </small>
+            </div>
+            <div class="form-group col-5">
+              <label for="set-ai-mask-url">Model Server API URL</label>
+              <input type="text" id="set-ai-mask-url" class="form-control" value="http://localhost:11434" placeholder="http://localhost:11434 or http://localhost:1234/v1">
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">
+                URL of your local model server or remote API endpoint.
+              </small>
+            </div>
+            <div class="form-group col-3" style="display:flex;align-items:flex-end;">
+              <button type="button" id="btn-test-ai-connection" class="btn btn-secondary" style="width:100%;">
+                Test AI Connection
+              </button>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-4">
+              <label for="set-ai-mask-model">Vision Model Name</label>
+              <input type="text" id="set-ai-mask-model" class="form-control" value="llama3.2-vision" placeholder="llama3.2-vision, llava, or minicpm-v">
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">
+                e.g. <code>llama3.2-vision</code>, <code>llava</code>, <code>minicpm-v</code>, or <code>gpt-4o-mini</code>.
+              </small>
+            </div>
+            <div class="form-group col-4">
+              <label for="set-ai-mask-key">API Key (Optional / Cloud)</label>
+              <input type="password" id="set-ai-mask-key" class="form-control" placeholder="Optional for local; required for cloud">
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">
+                Leave empty for local Ollama / LM Studio instances.
+              </small>
+            </div>
+            <div class="form-group col-4">
+              <label>AI Vision Auto-Masking</label>
+              <div style="display:flex;align-items:center;height:38px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="set-ai-mask-enabled" checked> Enable AI Vision Masking Feature
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div id="ai-test-result" style="margin-top:12px;font-size:0.85rem;color:var(--text-dim);font-family:var(--font-mono);"></div>
         </div>
 
         <button id="btn-save-all-settings" class="btn btn-primary btn-lg">

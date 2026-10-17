@@ -143,11 +143,21 @@ class AutoCalibrationConfig(BaseModel):
     require_night: bool = Field(default=True, description="Only perform auto-calibration during astronomical night")
 
 
+class AIVisionMaskingConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Enable local or cloud AI vision model auto-masking")
+    provider: str = Field(default="ollama", description="'ollama', 'lmstudio', or 'openai_compatible'")
+    api_url: str = Field(default="http://localhost:11434", description="Base URL of local Ollama/LM Studio instance or API endpoint")
+    model: str = Field(default="llama3.2-vision", description="Model name (e.g., 'llama3.2-vision', 'llava', 'minicpm-v', 'gpt-4o-mini')")
+    api_key: Optional[str] = Field(default=None, description="Optional API key for authenticated or cloud endpoints")
+    timeout_sec: float = Field(default=45.0, description="HTTP timeout in seconds for AI inference requests")
+
+
 class AIPluginsConfig(BaseModel):
     weather_enabled: bool = Field(default=True, description="Enable automated sky condition and cloud cover vision estimator")
     daytime_detector_enabled: bool = Field(default=True, description="Enable daytime object detection (birds, drones, planes)")
     meteor_detector_enabled: bool = Field(default=True, description="Enable fast transient meteor and fireball streak detector")
     auto_calibration: AutoCalibrationConfig = Field(default_factory=AutoCalibrationConfig)
+    vision_masking: AIVisionMaskingConfig = Field(default_factory=AIVisionMaskingConfig)
 
 
 

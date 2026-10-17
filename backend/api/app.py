@@ -55,6 +55,10 @@ composite_worker.start()
 
 
 
+from backend.plugins.ai_masking_service import AIVisionMaskingService
+ai_masking_service = AIVisionMaskingService(app_config.plugins.vision_masking)
+
+
 def apply_config_changes(new_config: SkyViewConfig):
     global app_config
     app_config = new_config
@@ -64,6 +68,7 @@ def apply_config_changes(new_config: SkyViewConfig):
     tracker_engine.update_config(app_config)
     auto_calibrator.update_config(app_config)
     storage_manager.update_config(app_config)
+    ai_masking_service.update_config(app_config.plugins.vision_masking)
 
 
 auto_calibrator = AutoCalibrationManager(
@@ -373,6 +378,50 @@ def detect_obstacles_endpoint(req: DetectObstaclesRequest):
         "height": img.shape[0]
     }
 
+
+class AITestConnectionRequest(BaseModel):
+    provider: Optional[str] = None
+    api_url: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+@app.post("/api/ai/test_connection")
+def test_ai_connection_endpoint(req: Optional[AITestConnectionRequest] = None):
+    """Tests connectivity to local Ollama / LM Studio or cloud API endpoint."""
+    if req and req.provider:
+        cfg = app_config.plugins.vision_masking.model_copy()
+        if req.provider:
+            cfg.provider = req.provider
+        if req.api_url:
+            cfg.api_url = req.api_url
+        if req.api_key is not None:
+            cfg.api_key = req.api_key
+        temp_service = AIVisionMaskingService(cfg)
+        return temp_service.test_connection()
+    return ai_masking_service.test_connection()
+
+
+@app.post("/api/cameras/{camera_id}/auto_mask_ai")
+def auto_mask_camera_ai_endpoint(camera_id: str):
+    """Uses configured local or cloud vision model to detect trees/poles and return obstacle polygons."""
+    img = stream_manager.get_camera_frame(camera_id)
+    if img is None:
+        raise HTTPException(status_code=400, detail=f"No active camera frame available for camera '{camera_id}'.")
+
+    try:
+        obstacles = ai_masking_service.auto_mask_frame(img)
+        return {
+            "status": "ok",
+            "camera_id": camera_id,
+            "provider": app_config.plugins.vision_masking.provider,
+            "model": app_config.plugins.vision_masking.model,
+            "count": len(obstacles),
+            "obstacles": obstacles,
+            "width": img.shape[1],
+            "height": img.shape[0]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI Vision auto-masking failed: {e}")
 
 
 @app.post("/api/calibration/solve")
