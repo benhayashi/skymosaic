@@ -309,9 +309,20 @@ class CalibrationStudio {
     return { x: px, y: py };
   }
 
+  getDisplayScale() {
+    if (this.canvas) {
+      const rect = this.canvas.getBoundingClientRect();
+      if (rect && rect.width > 0) {
+        return Math.max(1.0, this.canvas.width / rect.width);
+      }
+    }
+    return Math.max(1.0, (this.canvas && this.canvas.width ? this.canvas.width : 1280) / 960);
+  }
+
   render() {
     const w = this.canvas.width;
     const h = this.canvas.height;
+    const scale = this.getDisplayScale();
     this.ctx.clearRect(0, 0, w, h);
 
     // 1. Draw test shot
@@ -336,7 +347,7 @@ class CalibrationStudio {
     // 3. Draw constellations
     if (this.showConstellations) {
       this.ctx.strokeStyle = 'rgba(6, 182, 212, 0.55)';
-      this.ctx.lineWidth = 1.4;
+      this.ctx.lineWidth = Math.max(1.5, Math.round(1.5 * scale));
       this.ctx.beginPath();
       for (const [s1, s2] of this.constellations) {
         const p1 = projectedMap[s1.id];
@@ -356,21 +367,22 @@ class CalibrationStudio {
         if (!pt) continue;
 
         // Bright green/yellow alignment reticle
+        const starReticle = Math.max(4, Math.round(5 * scale));
         this.ctx.strokeStyle = '#10b981';
-        this.ctx.lineWidth = 1;
+        this.ctx.lineWidth = Math.max(1.5, Math.round(1.5 * scale));
         this.ctx.beginPath();
-        this.ctx.arc(pt.x, pt.y, 5, 0, 2 * Math.PI);
+        this.ctx.arc(pt.x, pt.y, starReticle, 0, 2 * Math.PI);
         this.ctx.stroke();
 
         this.ctx.fillStyle = '#34d399';
         this.ctx.beginPath();
-        this.ctx.arc(pt.x, pt.y, 2, 0, 2 * Math.PI);
+        this.ctx.arc(pt.x, pt.y, Math.max(2, Math.round(2 * scale)), 0, 2 * Math.PI);
         this.ctx.fill();
 
         if (this.showStarNames && s.mag <= 2.2) {
           this.ctx.fillStyle = '#a7f3d0';
-          this.ctx.font = '11px JetBrains Mono, monospace';
-          this.ctx.fillText(`${s.name} (${s.mag}m)`, pt.x + 8, pt.y - 4);
+          this.ctx.font = `${Math.max(10, Math.round(11 * scale))}px JetBrains Mono, monospace`;
+          this.ctx.fillText(`${s.name} (${s.mag}m)`, pt.x + Math.round(8 * scale), pt.y - Math.round(4 * scale));
         }
       }
     }
@@ -381,17 +393,20 @@ class CalibrationStudio {
       // Draw clicked point
       this.ctx.fillStyle = '#f59e0b';
       this.ctx.beginPath();
-      this.ctx.arc(m.pixel_x, m.pixel_y, 4, 0, 2 * Math.PI);
+      this.ctx.arc(m.pixel_x, m.pixel_y, Math.max(4, Math.round(5 * scale)), 0, 2 * Math.PI);
       this.ctx.fill();
 
+      const boxSz = Math.max(12, Math.round(14 * scale));
       this.ctx.strokeStyle = '#f59e0b';
-      this.ctx.strokeRect(m.pixel_x - 7, m.pixel_y - 7, 14, 14);
+      this.ctx.lineWidth = Math.max(1.5, Math.round(1.5 * scale));
+      this.ctx.strokeRect(m.pixel_x - boxSz / 2, m.pixel_y - boxSz / 2, boxSz, boxSz);
 
       // Connect to projected star if exists
       const proj = projectedMap[m.star_id];
       if (proj) {
         this.ctx.strokeStyle = '#f43f5e';
-        this.ctx.setLineDash([4, 4]);
+        this.ctx.lineWidth = Math.max(1.5, Math.round(2 * scale));
+        this.ctx.setLineDash([Math.round(6 * scale), Math.round(4 * scale)]);
         this.ctx.beginPath();
         this.ctx.moveTo(m.pixel_x, m.pixel_y);
         this.ctx.lineTo(proj.x, proj.y);
@@ -423,7 +438,8 @@ class CalibrationStudio {
         this.ctx.save();
         this.ctx.fillStyle = `${color}59`; // Distinct 35% opacity shaded mask area
         this.ctx.strokeStyle = color;
-        this.ctx.lineWidth = 2.5;
+        // High-visibility stroke scaled to screen resolution (approx 3.5 display pixels)
+        this.ctx.lineWidth = Math.max(3, Math.round(3.5 * scale));
         this.ctx.beginPath();
 
         for (let i = 0; i < obs.points.length; i++) {
@@ -437,26 +453,28 @@ class CalibrationStudio {
         this.ctx.fill();
         this.ctx.stroke();
 
-        // Draw vertex handles
+        // Draw vertex handles scaled to display resolution
+        const handleSz = Math.max(6, Math.round(8 * scale));
         this.ctx.fillStyle = color;
         for (const pt of obs.points) {
-          this.ctx.fillRect(pt[0] * w - 3, pt[1] * h - 3, 6, 6);
+          this.ctx.fillRect(pt[0] * w - handleSz / 2, pt[1] * h - handleSz / 2, handleSz, handleSz);
         }
 
-        // Draw obstacle label badge
+        // Draw obstacle label badge scaled to display resolution
         if (obs.points.length > 0) {
           const firstPx = obs.points[0][0] * w;
           const firstPy = obs.points[0][1] * h;
-          this.ctx.font = 'bold 11px JetBrains Mono, monospace';
+          const badgeSize = Math.max(11, Math.round(12 * scale));
+          this.ctx.font = `bold ${badgeSize}px JetBrains Mono, monospace`;
           this.ctx.fillStyle = '#ffffff';
           this.ctx.shadowColor = 'rgba(0,0,0,0.85)';
-          this.ctx.shadowBlur = 4;
-          this.ctx.fillText(`[#${idx + 1}] ${obs.label || 'Obstacle'}`, Math.max(10, firstPx - 10), Math.max(16, firstPy - 6));
+          this.ctx.shadowBlur = Math.round(4 * scale);
+          this.ctx.fillText(`[#${idx + 1}] ${obs.label || 'Obstacle'}`, Math.max(10, firstPx - 10), Math.max(16, firstPy - Math.round(6 * scale)));
         }
         this.ctx.restore();
       });
 
-      // Draw active in-progress polygon with translucent shaded fill
+      // Draw active in-progress polygon with translucent shaded fill & resolution-scaled lines
       if (this.isDrawingMask && this.drawingObstaclePoints.length > 0) {
         this.ctx.save();
         this.ctx.beginPath();
@@ -477,51 +495,58 @@ class CalibrationStudio {
         this.ctx.fillStyle = 'rgba(239, 68, 68, 0.35)';
         this.ctx.fill();
 
+        // Bold line width scaled to display resolution (approx 3.5 display pixels)
         this.ctx.strokeStyle = '#ef4444';
-        this.ctx.lineWidth = 2;
-        this.ctx.setLineDash([4, 4]);
+        this.ctx.lineWidth = Math.max(3, Math.round(3.5 * scale));
+        this.ctx.setLineDash([Math.round(8 * scale), Math.round(6 * scale)]);
         this.ctx.stroke();
         this.ctx.setLineDash([]);
 
-        // Vertices
+        // Vertices scaled to display resolution
+        const vRadius = Math.max(5, Math.round(6 * scale));
+        const startRadius = Math.max(8, Math.round(9 * scale));
+        const vertLineWidth = Math.max(2, Math.round(2 * scale));
+
         for (let i = 0; i < this.drawingObstaclePoints.length; i++) {
           const pt = this.drawingObstaclePoints[i];
           const px = pt[0] * w;
           const py = pt[1] * h;
           this.ctx.beginPath();
-          this.ctx.arc(px, py, i === 0 ? 6 : 4, 0, 2 * Math.PI);
+          this.ctx.arc(px, py, i === 0 ? startRadius : vRadius, 0, 2 * Math.PI);
           this.ctx.fillStyle = i === 0 ? '#fbbf24' : '#ef4444';
           this.ctx.fill();
           this.ctx.strokeStyle = '#ffffff';
-          this.ctx.lineWidth = 1.5;
+          this.ctx.lineWidth = vertLineWidth;
           this.ctx.stroke();
 
           if (i === 0 && this.drawingObstaclePoints.length >= 3) {
-            this.ctx.font = '10px JetBrains Mono, monospace';
+            const closeFontSize = Math.max(11, Math.round(12 * scale));
+            this.ctx.font = `bold ${closeFontSize}px JetBrains Mono, monospace`;
             this.ctx.fillStyle = '#fbbf24';
-            this.ctx.shadowColor = 'rgba(0,0,0,0.8)';
-            this.ctx.shadowBlur = 4;
-            this.ctx.fillText('Click to close', px + 8, py - 6);
+            this.ctx.shadowColor = 'rgba(0,0,0,0.85)';
+            this.ctx.shadowBlur = Math.round(4 * scale);
+            this.ctx.fillText('Click to close', px + Math.round(12 * scale), py - Math.round(8 * scale));
           }
         }
         this.ctx.restore();
       }
 
-      // Draw brush preview indicator when in brush or eraser mode
+      // Draw brush preview indicator scaled to display size
       if (this.lastBrushPos && (this.maskToolMode === 'brush' || this.maskToolMode === 'eraser')) {
+        const effectiveBrushRadius = this.brushSize * scale;
         this.ctx.save();
         this.ctx.beginPath();
-        this.ctx.arc(this.lastBrushPos.x, this.lastBrushPos.y, this.brushSize, 0, 2 * Math.PI);
+        this.ctx.arc(this.lastBrushPos.x, this.lastBrushPos.y, effectiveBrushRadius, 0, 2 * Math.PI);
         this.ctx.strokeStyle = this.maskToolMode === 'brush' ? '#ef4444' : '#38bdf8';
-        this.ctx.lineWidth = 2;
-        this.ctx.setLineDash([3, 3]);
+        this.ctx.lineWidth = Math.max(2.5, Math.round(2.5 * scale));
+        this.ctx.setLineDash([Math.round(5 * scale), Math.round(5 * scale)]);
         this.ctx.stroke();
         this.ctx.fillStyle = this.maskToolMode === 'brush' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(56, 189, 248, 0.2)';
         this.ctx.fill();
         this.ctx.restore();
       }
     }
-    }
+  }
 
   setMaskTool(mode) {
     this.maskToolMode = mode;
@@ -560,6 +585,9 @@ class CalibrationStudio {
 
   paintBrushStroke(x, y) {
     if (!this.brushCanvas.width) return;
+    const scale = this.getDisplayScale();
+    const effectiveRadius = this.brushSize * scale;
+
     this.brushCtx.save();
     if (this.maskToolMode === 'eraser') {
       this.brushCtx.globalCompositeOperation = 'destination-out';
@@ -571,7 +599,7 @@ class CalibrationStudio {
       this.brushCtx.strokeStyle = '#ef4444';
     }
 
-    this.brushCtx.lineWidth = this.brushSize * 2;
+    this.brushCtx.lineWidth = effectiveRadius * 2;
     this.brushCtx.lineCap = 'round';
     this.brushCtx.lineJoin = 'round';
 
@@ -582,7 +610,7 @@ class CalibrationStudio {
       this.brushCtx.stroke();
     }
     this.brushCtx.beginPath();
-    this.brushCtx.arc(x, y, this.brushSize, 0, 2 * Math.PI);
+    this.brushCtx.arc(x, y, effectiveRadius, 0, 2 * Math.PI);
     this.brushCtx.fill();
     this.brushCtx.restore();
 
@@ -771,10 +799,11 @@ class CalibrationStudio {
   }
 
   renderHorizonLine(w, h) {
+    const scale = this.getDisplayScale();
     // Computes topocentric horizon points across 360° azimuth at altitude = 0.0°
     this.ctx.strokeStyle = '#06b6d4';
-    this.ctx.lineWidth = 2;
-    this.ctx.setLineDash([6, 4]);
+    this.ctx.lineWidth = Math.max(2.5, Math.round(2.5 * scale));
+    this.ctx.setLineDash([Math.round(8 * scale), Math.round(5 * scale)]);
     this.ctx.beginPath();
 
     let started = false;
@@ -790,7 +819,7 @@ class CalibrationStudio {
         if (!started) {
           this.ctx.moveTo(pt.x, pt.y);
           started = true;
-        } else if (lastPt && Math.hypot(pt.x - lastPt.x, pt.y - lastPt.y) < 250) {
+        } else if (lastPt && Math.hypot(pt.x - lastPt.x, pt.y - lastPt.y) < (250 * scale)) {
           this.ctx.lineTo(pt.x, pt.y);
         } else {
           this.ctx.moveTo(pt.x, pt.y);
@@ -806,8 +835,9 @@ class CalibrationStudio {
     // Label 0° Horizon
     if (lastPt) {
       this.ctx.fillStyle = '#06b6d4';
-      this.ctx.font = '11px JetBrains Mono, monospace';
-      this.ctx.fillText("0° HORIZON", Math.min(w - 90, Math.max(10, lastPt.x)), Math.min(h - 10, Math.max(20, lastPt.y - 8)));
+      const fSize = Math.max(11, Math.round(12 * scale));
+      this.ctx.font = `bold ${fSize}px JetBrains Mono, monospace`;
+      this.ctx.fillText("0° HORIZON", Math.min(w - Math.round(110 * scale), Math.max(10, lastPt.x)), Math.min(h - 10, Math.max(20, lastPt.y - Math.round(8 * scale))));
     }
   }
 
@@ -998,7 +1028,9 @@ class CalibrationStudio {
         const firstPt = this.drawingObstaclePoints[0];
         const firstPx = firstPt[0] * this.canvas.width;
         const firstPy = firstPt[1] * this.canvas.height;
-        if (Math.hypot(x - firstPx, y - firstPy) < 18) {
+        const scale = this.getDisplayScale();
+        const closeTolerance = Math.max(24, Math.round(24 * scale));
+        if (Math.hypot(x - firstPx, y - firstPy) < closeTolerance) {
           const btnPoly = document.getElementById('btn-start-mask');
           if (btnPoly) {
             btnPoly.click();
