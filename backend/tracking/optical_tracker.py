@@ -11,6 +11,7 @@ from backend.astrometry.camera_model import (
     project_world_point_to_camera,
 )
 from backend.astrometry.celestial import get_all_celestial_objects, get_sun_coordinates
+from backend.config import SkyViewConfig
 from backend.plugins.metar_service import (
     fetch_metar,
     evaluate_aircraft_visibility,
