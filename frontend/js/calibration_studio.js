@@ -74,6 +74,14 @@ class CalibrationStudio {
       this.handleCanvasMouseUp();
     }, { passive: true });
 
+    this.canvas.addEventListener('mouseleave', () => {
+      this.currentMousePos = null;
+      if (this.maskToolMode === 'brush' || this.maskToolMode === 'eraser') {
+        this.lastBrushPos = null;
+      }
+      this.render();
+    });
+
     this.testImage.onload = () => {
       this.hasImage = true;
       this.canvas.width = this.testImage.naturalWidth || 1280;
@@ -90,7 +98,7 @@ class CalibrationStudio {
     const w = this.brushCanvas.width;
     const h = this.brushCanvas.height;
     this.brushCtx.clearRect(0, 0, w, h);
-    this.brushCtx.fillStyle = '#ffffff';
+    this.brushCtx.fillStyle = '#ef4444';
 
     for (const obs of this.obstacles) {
       if (obs.points && obs.points.length >= 3) {
@@ -399,14 +407,23 @@ class CalibrationStudio {
 
     // 7. Draw all configured obstacle polygons
     if (this.showMask) {
-      const colors = ['#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6', '#ec4899'];
+      // Live brush strokes preview when drawing
+      if (this.isBrushing && this.brushCanvas && this.brushCanvas.width > 0) {
+        this.ctx.save();
+        this.ctx.globalAlpha = 0.45;
+        this.ctx.drawImage(this.brushCanvas, 0, 0, w, h);
+        this.ctx.restore();
+      }
+
+      const colors = ['#ef4444', '#0ea5e9', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899'];
       this.obstacles.forEach((obs, idx) => {
         if (!obs.points || obs.points.length < 3) return;
         const color = colors[idx % colors.length];
 
-        this.ctx.fillStyle = `${color}33`; // 20% opacity
+        this.ctx.save();
+        this.ctx.fillStyle = `${color}59`; // Distinct 35% opacity shaded mask area
         this.ctx.strokeStyle = color;
-        this.ctx.lineWidth = 2;
+        this.ctx.lineWidth = 2.5;
         this.ctx.beginPath();
 
         for (let i = 0; i < obs.points.length; i++) {
@@ -430,56 +447,87 @@ class CalibrationStudio {
         if (obs.points.length > 0) {
           const firstPx = obs.points[0][0] * w;
           const firstPy = obs.points[0][1] * h;
-          this.ctx.font = '10px JetBrains Mono, monospace';
-          this.ctx.fillStyle = color;
+          this.ctx.font = 'bold 11px JetBrains Mono, monospace';
+          this.ctx.fillStyle = '#ffffff';
+          this.ctx.shadowColor = 'rgba(0,0,0,0.85)';
+          this.ctx.shadowBlur = 4;
           this.ctx.fillText(`[#${idx + 1}] ${obs.label || 'Obstacle'}`, Math.max(10, firstPx - 10), Math.max(16, firstPy - 6));
         }
+        this.ctx.restore();
       });
 
-        // Draw active in-progress drawing points
-        if (this.isDrawingMask && this.drawingObstaclePoints.length > 0) {
-          this.ctx.strokeStyle = '#38bdf8';
-          this.ctx.lineWidth = 2;
-          this.ctx.setLineDash([4, 4]);
-          this.ctx.beginPath();
+      // Draw active in-progress polygon with translucent shaded fill
+      if (this.isDrawingMask && this.drawingObstaclePoints.length > 0) {
+        this.ctx.save();
+        this.ctx.beginPath();
+        const firstPt = this.drawingObstaclePoints[0];
+        this.ctx.moveTo(firstPt[0] * w, firstPt[1] * h);
 
-          for (let i = 0; i < this.drawingObstaclePoints.length; i++) {
-            const pt = this.drawingObstaclePoints[i];
-            const px = pt[0] * w;
-            const py = pt[1] * h;
-            if (i === 0) this.ctx.moveTo(px, py);
-            else this.ctx.lineTo(px, py);
-          }
-          this.ctx.stroke();
-          this.ctx.setLineDash([]);
-
-          // Vertices
-          this.ctx.fillStyle = '#38bdf8';
-          for (const pt of this.drawingObstaclePoints) {
-            this.ctx.beginPath();
-            this.ctx.arc(pt[0] * w, pt[1] * h, 4, 0, 2 * Math.PI);
-            this.ctx.fill();
-          }
+        for (let i = 1; i < this.drawingObstaclePoints.length; i++) {
+          const pt = this.drawingObstaclePoints[i];
+          this.ctx.lineTo(pt[0] * w, pt[1] * h);
         }
 
-        // Draw brush preview indicator when in brush or eraser mode
-        if (this.lastBrushPos && (this.maskToolMode === 'brush' || this.maskToolMode === 'eraser')) {
-          this.ctx.save();
-          this.ctx.beginPath();
-          this.ctx.arc(this.lastBrushPos.x, this.lastBrushPos.y, this.brushSize, 0, 2 * Math.PI);
-          this.ctx.strokeStyle = this.maskToolMode === 'brush' ? '#f59e0b' : '#38bdf8';
-          this.ctx.lineWidth = 2;
-          this.ctx.setLineDash([3, 3]);
-          this.ctx.stroke();
-          this.ctx.restore();
+        if (this.currentMousePos) {
+          this.ctx.lineTo(this.currentMousePos.x, this.currentMousePos.y);
         }
+        this.ctx.closePath();
+
+        // Visible translucent red shaded mask area over camera view
+        this.ctx.fillStyle = 'rgba(239, 68, 68, 0.35)';
+        this.ctx.fill();
+
+        this.ctx.strokeStyle = '#ef4444';
+        this.ctx.lineWidth = 2;
+        this.ctx.setLineDash([4, 4]);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        // Vertices
+        for (let i = 0; i < this.drawingObstaclePoints.length; i++) {
+          const pt = this.drawingObstaclePoints[i];
+          const px = pt[0] * w;
+          const py = pt[1] * h;
+          this.ctx.beginPath();
+          this.ctx.arc(px, py, i === 0 ? 6 : 4, 0, 2 * Math.PI);
+          this.ctx.fillStyle = i === 0 ? '#fbbf24' : '#ef4444';
+          this.ctx.fill();
+          this.ctx.strokeStyle = '#ffffff';
+          this.ctx.lineWidth = 1.5;
+          this.ctx.stroke();
+
+          if (i === 0 && this.drawingObstaclePoints.length >= 3) {
+            this.ctx.font = '10px JetBrains Mono, monospace';
+            this.ctx.fillStyle = '#fbbf24';
+            this.ctx.shadowColor = 'rgba(0,0,0,0.8)';
+            this.ctx.shadowBlur = 4;
+            this.ctx.fillText('Click to close', px + 8, py - 6);
+          }
+        }
+        this.ctx.restore();
       }
+
+      // Draw brush preview indicator when in brush or eraser mode
+      if (this.lastBrushPos && (this.maskToolMode === 'brush' || this.maskToolMode === 'eraser')) {
+        this.ctx.save();
+        this.ctx.beginPath();
+        this.ctx.arc(this.lastBrushPos.x, this.lastBrushPos.y, this.brushSize, 0, 2 * Math.PI);
+        this.ctx.strokeStyle = this.maskToolMode === 'brush' ? '#ef4444' : '#38bdf8';
+        this.ctx.lineWidth = 2;
+        this.ctx.setLineDash([3, 3]);
+        this.ctx.stroke();
+        this.ctx.fillStyle = this.maskToolMode === 'brush' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(56, 189, 248, 0.2)';
+        this.ctx.fill();
+        this.ctx.restore();
+      }
+    }
     }
 
   setMaskTool(mode) {
     this.maskToolMode = mode;
     this.isDrawingMask = (mode === 'polygon');
     this.drawingObstaclePoints = [];
+    this.currentMousePos = null;
     if (this.canvas) {
       if (mode === 'brush' || mode === 'eraser') {
         this.canvas.style.cursor = 'crosshair';
@@ -493,7 +541,7 @@ class CalibrationStudio {
   }
 
   setBrushSize(sz) {
-    this.brushSize = Math.max(5, Math.min(120, parseInt(sz, 10) || 25));
+    this.brushSize = Math.max(5, Math.min(400, parseInt(sz, 10) || 25));
   }
 
   handleCanvasMouseDown(e) {
@@ -519,8 +567,8 @@ class CalibrationStudio {
       this.brushCtx.strokeStyle = '#000000';
     } else {
       this.brushCtx.globalCompositeOperation = 'source-over';
-      this.brushCtx.fillStyle = '#ffffff';
-      this.brushCtx.strokeStyle = '#ffffff';
+      this.brushCtx.fillStyle = '#ef4444';
+      this.brushCtx.strokeStyle = '#ef4444';
     }
 
     this.brushCtx.lineWidth = this.brushSize * 2;
@@ -656,6 +704,12 @@ class CalibrationStudio {
           });
         });
         this.renderObstacleList();
+      } else {
+        const prevCount = this.obstacles.length;
+        this.obstacles = this.obstacles.filter(o => !o.id.startsWith('brush_'));
+        if (this.obstacles.length !== prevCount) {
+          this.renderObstacleList();
+        }
       }
     } catch (e) {
       console.warn("Failed to extract polygons from brush canvas:", e);
@@ -925,6 +979,9 @@ class CalibrationStudio {
         this.paintBrushStroke(x, y);
       }
       this.render();
+    } else if (this.isDrawingMask) {
+      this.currentMousePos = { x, y };
+      this.render();
     }
   }
 
@@ -936,6 +993,20 @@ class CalibrationStudio {
     const y = Math.round((e.clientY - rect.top) * scaleY);
 
     if (this.isDrawingMask) {
+      // If clicking near first point (closing loop) and >= 3 points exist
+      if (this.drawingObstaclePoints.length >= 3) {
+        const firstPt = this.drawingObstaclePoints[0];
+        const firstPx = firstPt[0] * this.canvas.width;
+        const firstPy = firstPt[1] * this.canvas.height;
+        if (Math.hypot(x - firstPx, y - firstPy) < 18) {
+          const btnPoly = document.getElementById('btn-start-mask');
+          if (btnPoly) {
+            btnPoly.click();
+            return;
+          }
+        }
+      }
+
       // Add normalized point to current drawing obstacle
       this.drawingObstaclePoints.push([
         Math.round((x / this.canvas.width) * 10000) / 10000,
