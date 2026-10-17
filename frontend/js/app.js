@@ -2146,7 +2146,7 @@ function updateTelemetry() {
 function updateMetarStatusCard(metar) {
   const badge = document.getElementById('metar-status-badge');
   const summary = document.getElementById('metar-summary-text');
-  if (!metar || !metar.station) {
+  if (!metar || (!metar.station && !metar.icao)) {
     if (badge) {
       badge.textContent = 'No Station Configured';
       badge.style.color = 'var(--text-dim)';
@@ -2156,12 +2156,16 @@ function updateMetarStatusCard(metar) {
     return;
   }
 
+  const stationCode = metar.icao || metar.station;
+  const flightCat = metar.flight_category || metar.flt_cat || metar.fltCat || 'VFR';
+  const cover = metar.cover || 'CLR';
+
   if (badge) {
-    badge.textContent = `${metar.station} (${metar.flt_cat || 'VFR'})`;
-    if (metar.flt_cat === 'LIFR' || metar.flt_cat === 'IFR') {
+    badge.textContent = `${stationCode} (${flightCat})`;
+    if (flightCat === 'LIFR' || flightCat === 'IFR') {
       badge.style.color = '#ef4444';
       badge.style.borderColor = 'rgba(239,68,68,0.4)';
-    } else if (metar.flt_cat === 'MVFR') {
+    } else if (flightCat === 'MVFR') {
       badge.style.color = '#f59e0b';
       badge.style.borderColor = 'rgba(245,158,11,0.4)';
     } else {
@@ -2171,11 +2175,13 @@ function updateMetarStatusCard(metar) {
   }
 
   if (summary) {
-    const visStr = metar.visibility_statute_miles != null ? `${metar.visibility_statute_miles} sm vis` : 'vis unk';
+    const vis = metar.visib_miles != null ? metar.visib_miles : metar.visibility_statute_miles;
+    const visStr = vis != null ? `${vis} sm vis` : 'vis unk';
     const ceilStr = metar.ceiling_ft != null ? `Ceiling ${metar.ceiling_ft}ft` : 'No ceiling';
-    const tempStr = metar.temperature_c != null ? `${metar.temperature_c}°C` : '';
-    const raw = metar.raw_observation ? `\nRAW: ${metar.raw_observation}` : '';
-    summary.innerText = `${metar.station} • ${metar.cover} • ${ceilStr} • ${visStr} • ${tempStr}${raw}`;
+    const temp = metar.temp_c != null ? metar.temp_c : metar.temperature_c;
+    const tempStr = temp != null ? `${temp}°C` : '';
+    const raw = metar.raw_metar || metar.raw_observation ? `\nRAW: ${metar.raw_metar || metar.raw_observation}` : '';
+    summary.innerText = `${stationCode} • ${cover} • ${ceilStr} • ${visStr} • ${tempStr}${raw}`;
   }
 }
 
@@ -2187,7 +2193,7 @@ function initMetarTester() {
   testBtn.addEventListener('click', async () => {
     const icao = icaoInput.value.trim().toUpperCase();
     if (!icao) {
-      showToast('Please enter an airport ICAO code (e.g. KORD, KJFK)', 'error');
+      showToast('Please enter an airport ICAO code (e.g. KORD, KJFK, KNHK)', 'error');
       return;
     }
 
@@ -2197,15 +2203,18 @@ function initMetarTester() {
     try {
       const res = await fetch(`/api/weather/metar?icao=${encodeURIComponent(icao)}`);
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || 'Failed to retrieve METAR data');
+      if (!res.ok || data.status === 'not_found' || !data.metar) {
+        throw new Error(data.detail || `No METAR report found for ${icao}`);
       }
 
-      updateMetarStatusCard(data);
+      const metar = data.metar;
+      updateMetarStatusCard(metar);
       if (skyViewer) {
-        skyViewer.setWeatherConditions({ metar: data });
+        skyViewer.setWeatherConditions({ metar: metar });
       }
-      showToast(`METAR loaded for ${icao}: ${data.cover}, ${data.flight_category || data.flt_cat || 'OK'}`, 'success');
+      const cover = metar.cover || 'CLR';
+      const cat = metar.flight_category || metar.flt_cat || 'VFR';
+      showToast(`METAR loaded for ${icao}: ${cover}, ${cat}`, 'success');
     } catch (e) {
       showToast(e.message || 'Error fetching METAR', 'error');
       const summary = document.getElementById('metar-summary-text');
