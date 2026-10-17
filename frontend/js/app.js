@@ -684,6 +684,16 @@ function initActionButtons() {
 
 // Canvas Pan, Zoom & Rotation HUD controls
 function initZoomControls() {
+  document.getElementById('btn-drag-mode')?.addEventListener('click', () => {
+    skyViewer?.toggleDragMode();
+    const mode = skyViewer?.dragMode;
+    if (mode === 'rotate') {
+      showToast('Drag Mode: Rotate Dome (Drag anywhere on sky to rotate)', 'info');
+    } else {
+      showToast('Drag Mode: Pan / Translate (Drag to reposition view)', 'info');
+    }
+  });
+
   document.getElementById('btn-zoom-in')?.addEventListener('click', () => {
     skyViewer?.zoomIn();
   });

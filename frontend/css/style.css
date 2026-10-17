@@ -497,6 +497,12 @@ input[type="range"] {
   transform: scale(1.05);
 }
 
+.zoom-hud-btn.active {
+  background: rgba(6, 182, 212, 0.3);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
 .zoom-hud-divider {
   height: 1px;
   background: var(--border-color);

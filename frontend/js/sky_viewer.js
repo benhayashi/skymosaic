@@ -22,6 +22,7 @@ class SkyViewer {
     this.panX = 0.0;
     this.panY = 0.0;
     this.rotationDeg = 0.0; // 0 = North up, positive = clockwise
+    this.dragMode = 'rotate'; // 'rotate' (default) or 'pan'
     this.isDragging = false;
     this.isRotating = false;
     this.dragStartX = 0;
@@ -44,6 +45,15 @@ class SkyViewer {
 
     this.initImageLoader();
     this.initPanZoomEvents();
+  }
+
+  setDragMode(mode) {
+    this.dragMode = mode;
+    this.updateZoomUI();
+  }
+
+  toggleDragMode() {
+    this.setDragMode(this.dragMode === 'rotate' ? 'pan' : 'rotate');
   }
 
   initImageLoader() {
@@ -107,18 +117,27 @@ class SkyViewer {
       }
     }, { passive: false });
 
-    // Prevent context menu on right click so user can right-drag to rotate
+    // Prevent context menu on right click so user can secondary-drag
     this.canvas.addEventListener('contextmenu', (e) => {
       e.preventDefault();
     });
 
-    // 2. Mouse Drag (Left-Drag = Pan, Shift+Left-Drag or Right-Drag = Rotate)
+    // 2. Mouse Drag:
+    // Default drag action is determined by this.dragMode ('rotate' by default, or 'pan').
+    // Holding Shift/Alt or using Right-Click temporarily toggles to the other mode.
     this.canvas.addEventListener('mousedown', (e) => {
       const rect = this.canvas.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
+      // Center of the dome on the canvas accounting for pan
+      const cx = rect.left + rect.width / 2 + this.panX;
+      const cy = rect.top + rect.height / 2 + this.panY;
 
+      // Determine effective mode for this drag
+      let effectiveMode = this.dragMode;
       if (e.shiftKey || e.altKey || e.button === 2) {
+        effectiveMode = (this.dragMode === 'rotate') ? 'pan' : 'rotate';
+      }
+
+      if (effectiveMode === 'rotate') {
         // Dome Rotation Drag
         e.preventDefault();
         this.isRotating = true;
@@ -126,8 +145,8 @@ class SkyViewer {
         this.rotateStartAngle = Math.atan2(e.clientY - cy, e.clientX - cx);
         this.rotateBaseDeg = this.rotationDeg;
         this.canvas.style.cursor = 'crosshair';
-      } else if (e.button === 0) {
-        // Canvas Pan Drag
+      } else {
+        // Canvas Pan / Translate Drag
         this.isDragging = true;
         this.isRotating = false;
         this.dragStartX = e.clientX - this.panX;
@@ -139,8 +158,8 @@ class SkyViewer {
     window.addEventListener('mousemove', (e) => {
       if (this.isRotating) {
         const rect = this.canvas.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2;
-        const cy = rect.top + rect.height / 2;
+        const cx = rect.left + rect.width / 2 + this.panX;
+        const cy = rect.top + rect.height / 2 + this.panY;
         const currentAngle = Math.atan2(e.clientY - cy, e.clientX - cx);
         const deltaAngleDeg = (currentAngle - this.rotateStartAngle) * (180.0 / Math.PI);
         this.setRotation(this.rotateBaseDeg + deltaAngleDeg);
@@ -164,15 +183,29 @@ class SkyViewer {
       this.resetZoom();
     });
 
-    // 4. Touch Gestures: Pinch-to-zoom, two-finger twist to rotate, and single-finger pan for mobile
+    // 4. Touch Gestures:
+    // Single finger = dragMode (rotate or pan)
+    // Two fingers = Pinch-to-zoom AND twist rotation simultaneously
     this.canvas.addEventListener('touchstart', (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2 + this.panX;
+      const cy = rect.top + rect.height / 2 + this.panY;
+
       if (e.touches.length === 1) {
-        this.isDragging = true;
-        this.isRotating = false;
-        this.dragStartX = e.touches[0].clientX - this.panX;
-        this.dragStartY = e.touches[0].clientY - this.panY;
+        if (this.dragMode === 'rotate') {
+          this.isRotating = true;
+          this.isDragging = false;
+          this.rotateStartAngle = Math.atan2(e.touches[0].clientY - cy, e.touches[0].clientX - cx);
+          this.rotateBaseDeg = this.rotationDeg;
+        } else {
+          this.isDragging = true;
+          this.isRotating = false;
+          this.dragStartX = e.touches[0].clientX - this.panX;
+          this.dragStartY = e.touches[0].clientY - this.panY;
+        }
       } else if (e.touches.length === 2) {
         this.isDragging = false;
+        this.isRotating = false;
         const dx = e.touches[1].clientX - e.touches[0].clientX;
         const dy = e.touches[1].clientY - e.touches[0].clientY;
         this.lastTouchDist = Math.hypot(dx, dy);
@@ -182,10 +215,19 @@ class SkyViewer {
     }, { passive: true });
 
     this.canvas.addEventListener('touchmove', (e) => {
-      if (e.touches.length === 1 && this.isDragging) {
-        this.panX = e.touches[0].clientX - this.dragStartX;
-        this.panY = e.touches[0].clientY - this.dragStartY;
-        this.render();
+      if (e.touches.length === 1) {
+        if (this.isRotating) {
+          const rect = this.canvas.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2 + this.panX;
+          const cy = rect.top + rect.height / 2 + this.panY;
+          const currentAngle = Math.atan2(e.touches[0].clientY - cy, e.touches[0].clientX - cx);
+          const deltaAngleDeg = (currentAngle - this.rotateStartAngle) * (180.0 / Math.PI);
+          this.setRotation(this.rotateBaseDeg + deltaAngleDeg);
+        } else if (this.isDragging) {
+          this.panX = e.touches[0].clientX - this.dragStartX;
+          this.panY = e.touches[0].clientY - this.dragStartY;
+          this.render();
+        }
       } else if (e.touches.length === 2) {
         const dx = e.touches[1].clientX - e.touches[0].clientX;
         const dy = e.touches[1].clientY - e.touches[0].clientY;
@@ -216,12 +258,17 @@ class SkyViewer {
       this.isRotating = false;
       this.lastTouchDist = null;
       this.lastTouchAngle = null;
+      this.updateCursor();
     }, { passive: true });
   }
 
   updateCursor() {
     if (!this.canvas) return;
-    this.canvas.style.cursor = this.zoom > 1.05 ? 'grab' : 'default';
+    if (this.dragMode === 'rotate') {
+      this.canvas.style.cursor = 'grab';
+    } else {
+      this.canvas.style.cursor = this.zoom > 1.05 ? 'grab' : 'default';
+    }
   }
 
   zoomIn() {
@@ -301,6 +348,19 @@ class SkyViewer {
     if (resetBtn) {
       const isModified = (this.zoom !== 1.0 || this.panX !== 0 || this.panY !== 0 || this.rotationDeg !== 0);
       resetBtn.style.opacity = isModified ? '1.0' : '0.4';
+    }
+
+    const modeBtn = document.getElementById('btn-drag-mode');
+    if (modeBtn) {
+      if (this.dragMode === 'rotate') {
+        modeBtn.innerHTML = '🔄';
+        modeBtn.title = 'Mouse Drag: Rotate View (Click to switch to Pan / Translate)';
+        modeBtn.classList.remove('active');
+      } else {
+        modeBtn.innerHTML = '✋';
+        modeBtn.title = 'Mouse Drag: Pan / Translate (Click to switch to Rotate)';
+        modeBtn.classList.add('active');
+      }
     }
   }
 

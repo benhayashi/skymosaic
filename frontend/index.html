@@ -149,11 +149,13 @@
 
             <!-- On-Canvas Zoom & Rotation HUD Controls -->
             <div class="canvas-zoom-hud">
+              <button type="button" id="btn-drag-mode" class="zoom-hud-btn" title="Mouse Drag: Rotate View (Click to switch to Pan / Translate)">🔄</button>
+              <div class="zoom-hud-divider"></div>
               <button type="button" id="btn-zoom-in" class="zoom-hud-btn" title="Zoom In (+)">+</button>
               <button type="button" id="btn-zoom-out" class="zoom-hud-btn" title="Zoom Out (−)">−</button>
               <div class="zoom-hud-divider"></div>
-              <button type="button" id="btn-rotate-ccw" class="zoom-hud-btn" title="Rotate Dome Counter-Clockwise (↺ 15° / Shift+Drag)">↺</button>
-              <button type="button" id="btn-rotate-cw" class="zoom-hud-btn" title="Rotate Dome Clockwise (↻ 15° / Shift+Drag)">↻</button>
+              <button type="button" id="btn-rotate-ccw" class="zoom-hud-btn" title="Rotate Dome Counter-Clockwise (↺ 15°)">↺</button>
+              <button type="button" id="btn-rotate-cw" class="zoom-hud-btn" title="Rotate Dome Clockwise (↻ 15°)">↻</button>
               <div class="zoom-hud-divider"></div>
               <button type="button" id="btn-zoom-reset" class="zoom-hud-btn" title="Reset Pan, Zoom & Rotation (1:1 / 0°)">⟲</button>
               <span id="val-canvas-zoom" class="zoom-hud-badge" style="display: none;">1.0x</span>
