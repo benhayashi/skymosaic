@@ -817,6 +817,8 @@ function initModeSwitcher() {
       btnTimelapse?.classList.add('active');
       if (badge) {
         badge.textContent = 'TIMELAPSE / LONG-EXPOSURE MODE';
+        badge.style.color = 'var(--text-main)';
+      }
       skyViewer.pollInterval = 5000;
     }
 
