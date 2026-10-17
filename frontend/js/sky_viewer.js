@@ -22,7 +22,7 @@ class SkyViewer {
     this.panX = 0.0;
     this.panY = 0.0;
     this.rotationDeg = 0.0; // 0 = North up, positive = clockwise
-    this.dragMode = 'rotate'; // 'rotate' (default) or 'pan'
+    this.dragMode = 'smart'; // 'smart' (inside=pan, outside=rotate), 'pan', or 'rotate'
     this.isDragging = false;
     this.isRotating = false;
     this.dragStartX = 0;
@@ -31,6 +31,12 @@ class SkyViewer {
     this.rotateBaseDeg = 0;
     this.lastTouchDist = null;
     this.lastTouchAngle = null;
+
+    // --- Weather & Adaptive Visibility State ---
+    this.skyVisibilityMode = 'adaptive'; // 'adaptive' or 'always'
+    this.sunAltitude = null;
+    this.metarData = null;
+    this.weatherData = null;
 
     // --- DVR & Playback State ---
     this.isLive = true;
@@ -50,10 +56,35 @@ class SkyViewer {
   setDragMode(mode) {
     this.dragMode = mode;
     this.updateZoomUI();
+    this.updateCursor();
   }
 
   toggleDragMode() {
-    this.setDragMode(this.dragMode === 'rotate' ? 'pan' : 'rotate');
+    if (this.dragMode === 'smart') {
+      this.setDragMode('pan');
+    } else if (this.dragMode === 'pan') {
+      this.setDragMode('rotate');
+    } else {
+      this.setDragMode('smart');
+    }
+  }
+
+  setWeatherConditions(info) {
+    if (info) {
+      if (info.sun && info.sun.altitude_deg != null) {
+        this.sunAltitude = info.sun.altitude_deg;
+      }
+      if (info.metar) {
+        this.metarData = info.metar;
+      }
+      if (info.weather) {
+        this.weatherData = info.weather;
+      }
+      if (info.sky_visibility_mode) {
+        this.skyVisibilityMode = info.sky_visibility_mode;
+      }
+    }
+    this.render();
   }
 
   initImageLoader() {
@@ -123,18 +154,27 @@ class SkyViewer {
     });
 
     // 2. Mouse Drag:
-    // Default drag action is determined by this.dragMode ('rotate' by default, or 'pan').
-    // Holding Shift/Alt or using Right-Click temporarily toggles to the other mode.
+    // Drag mode can be:
+    // 'smart': Inside celestial dome = Pan / Translate. Outside dome = Rotate.
+    // 'pan': Pan / Translate anywhere.
+    // 'rotate': Rotate dome anywhere.
+    // Holding Shift/Alt or using Right-Click temporarily toggles Pan vs Rotate.
     this.canvas.addEventListener('mousedown', (e) => {
       const rect = this.canvas.getBoundingClientRect();
-      // Center of the dome on the canvas accounting for pan
       const cx = rect.left + rect.width / 2 + this.panX;
       const cy = rect.top + rect.height / 2 + this.panY;
+      const domeRadius = (Math.min(rect.width, rect.height) / 2) * this.zoom;
+      const distFromCenter = Math.hypot(e.clientX - cx, e.clientY - cy);
+      const isInsideDome = distFromCenter <= domeRadius;
 
       // Determine effective mode for this drag
       let effectiveMode = this.dragMode;
+      if (this.dragMode === 'smart') {
+        effectiveMode = isInsideDome ? 'pan' : 'rotate';
+      }
+
       if (e.shiftKey || e.altKey || e.button === 2) {
-        effectiveMode = (this.dragMode === 'rotate') ? 'pan' : 'rotate';
+        effectiveMode = (effectiveMode === 'rotate') ? 'pan' : 'rotate';
       }
 
       if (effectiveMode === 'rotate') {
@@ -152,6 +192,20 @@ class SkyViewer {
         this.dragStartX = e.clientX - this.panX;
         this.dragStartY = e.clientY - this.panY;
         this.canvas.style.cursor = 'grabbing';
+      }
+    });
+
+    // Dynamically update hover cursor based on smart drag position
+    this.canvas.addEventListener('mousemove', (e) => {
+      if (!this.isDragging && !this.isRotating) {
+        if (this.dragMode === 'smart') {
+          const rect = this.canvas.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2 + this.panX;
+          const cy = rect.top + rect.height / 2 + this.panY;
+          const domeRadius = (Math.min(rect.width, rect.height) / 2) * this.zoom;
+          const dist = Math.hypot(e.clientX - cx, e.clientY - cy);
+          this.canvas.style.cursor = dist <= domeRadius ? (this.zoom > 1.05 ? 'grab' : 'default') : 'crosshair';
+        }
       }
     });
 
@@ -184,15 +238,22 @@ class SkyViewer {
     });
 
     // 4. Touch Gestures:
-    // Single finger = dragMode (rotate or pan)
+    // Single finger = smart/pan/rotate
     // Two fingers = Pinch-to-zoom AND twist rotation simultaneously
     this.canvas.addEventListener('touchstart', (e) => {
       const rect = this.canvas.getBoundingClientRect();
       const cx = rect.left + rect.width / 2 + this.panX;
       const cy = rect.top + rect.height / 2 + this.panY;
+      const domeRadius = (Math.min(rect.width, rect.height) / 2) * this.zoom;
 
       if (e.touches.length === 1) {
-        if (this.dragMode === 'rotate') {
+        const distFromCenter = Math.hypot(e.touches[0].clientX - cx, e.touches[0].clientY - cy);
+        let effectiveMode = this.dragMode;
+        if (this.dragMode === 'smart') {
+          effectiveMode = (distFromCenter <= domeRadius) ? 'pan' : 'rotate';
+        }
+
+        if (effectiveMode === 'rotate') {
           this.isRotating = true;
           this.isDragging = false;
           this.rotateStartAngle = Math.atan2(e.touches[0].clientY - cy, e.touches[0].clientX - cx);
@@ -266,7 +327,10 @@ class SkyViewer {
     if (!this.canvas) return;
     if (this.dragMode === 'rotate') {
       this.canvas.style.cursor = 'grab';
+    } else if (this.dragMode === 'pan') {
+      this.canvas.style.cursor = this.zoom > 1.05 ? 'grab' : 'default';
     } else {
+      // smart mode: default to pointer/grab depending on zoom
       this.canvas.style.cursor = this.zoom > 1.05 ? 'grab' : 'default';
     }
   }
@@ -352,14 +416,18 @@ class SkyViewer {
 
     const modeBtn = document.getElementById('btn-drag-mode');
     if (modeBtn) {
-      if (this.dragMode === 'rotate') {
-        modeBtn.innerHTML = '🔄';
-        modeBtn.title = 'Mouse Drag: Rotate View (Click to switch to Pan / Translate)';
+      if (this.dragMode === 'smart') {
+        modeBtn.innerHTML = '🎯';
+        modeBtn.title = 'Mouse Drag: Smart Mode (Inside Dome = Pan, Outside Margin = Rotate). Click to lock Pan.';
         modeBtn.classList.remove('active');
-      } else {
+      } else if (this.dragMode === 'pan') {
         modeBtn.innerHTML = '✋';
-        modeBtn.title = 'Mouse Drag: Pan / Translate (Click to switch to Rotate)';
+        modeBtn.title = 'Mouse Drag: Pan / Translate Locked. Click to switch to Rotate Locked.';
         modeBtn.classList.add('active');
+      } else {
+        modeBtn.innerHTML = '🔄';
+        modeBtn.title = 'Mouse Drag: Rotate View Locked. Click to switch to Smart Mode.';
+        modeBtn.classList.remove('active');
       }
     }
   }
@@ -626,14 +694,28 @@ class SkyViewer {
     this.ctx.font = '10px JetBrains Mono, monospace';
 
     for (const target of this.targets) {
+      // In adaptive mode, if explicitly marked not visible, style as obscured/dimmed
+      const isVisible = target.visible !== false;
+      const isAdaptive = this.skyVisibilityMode === 'adaptive';
+      const isObscured = isAdaptive && !isVisible;
+
       const px = (target.pixel_x / (this.targetCanvasW || 1200)) * w;
       const py = (target.pixel_y / (this.targetCanvasH || 1200)) * h;
-      const color = target.color || '#06b6d4';
+      let color = target.color || '#06b6d4';
+      if (isObscured) {
+        color = '#64748b'; // Dim slate gray for obscured targets
+      }
       const cat = target.category;
 
       this.ctx.strokeStyle = color;
       this.ctx.fillStyle = color;
       this.ctx.lineWidth = 1.5;
+
+      if (isObscured) {
+        this.ctx.setLineDash([3, 3]);
+      } else {
+        this.ctx.setLineDash([]);
+      }
 
       if (cat === 'airplane') {
         // Cyan Aircraft Box HUD
@@ -655,18 +737,22 @@ class SkyViewer {
           }
         }
 
-        if (target.telemetry && target.telemetry.range_km != null) {
+        if (target.telemetry && (target.telemetry.range_miles != null || target.telemetry.range_km != null)) {
           if (this.unitSystem === 'us') {
-            const mi = (target.telemetry.range_km * 0.621371).toFixed(1);
+            const mi = target.telemetry.range_miles != null ? target.telemetry.range_miles.toFixed(1) : (target.telemetry.range_km * 0.621371).toFixed(1);
             distText = `${mi}mi`;
           } else {
-            distText = `${target.telemetry.range_km.toFixed(1)}km`;
+            const km = target.telemetry.range_km != null ? target.telemetry.range_km.toFixed(1) : (target.telemetry.range_miles * 1.60934).toFixed(1);
+            distText = `${km}km`;
           }
         }
 
         const flightName = target.telemetry?.flight || target.label;
         const details = [altText, distText].filter(Boolean).join(' • ');
         displayLabel = details ? `${flightName} (${details})` : flightName;
+        if (isObscured) {
+          displayLabel += ' [☁ Obscured]';
+        }
 
         this.ctx.fillText(`✈ ${displayLabel}`, px + 14, py + 3);
       } else if (cat === 'satellite') {
@@ -678,10 +764,11 @@ class SkyViewer {
         this.ctx.lineTo(px - 9, py);
         this.ctx.closePath();
         this.ctx.stroke();
-        this.ctx.fillText(`🛰 ${target.label}`, px + 13, py + 3);
+        const satLabel = isObscured ? `${target.label} [☁ Obscured]` : target.label;
+        this.ctx.fillText(`🛰 ${satLabel}`, px + 13, py + 3);
       } else if (cat === 'unidentified') {
         // Red Alert HUD (Bracket crosshair)
-        this.ctx.strokeStyle = '#ef4444';
+        this.ctx.strokeStyle = isObscured ? '#64748b' : '#ef4444';
         this.ctx.lineWidth = 2;
         const b = 12;
         this.ctx.beginPath();
@@ -691,7 +778,7 @@ class SkyViewer {
         this.ctx.moveTo(px + b - 5, py + b); this.ctx.lineTo(px + b, py + b); this.ctx.lineTo(px + b, py + b - 5);
         this.ctx.stroke();
 
-        this.ctx.fillStyle = '#ef4444';
+        this.ctx.fillStyle = isObscured ? '#64748b' : '#ef4444';
         this.ctx.fillText(`⚠ ${target.label}`, px + 15, py + 4);
       } else if (cat === 'celestial') {
         this.ctx.beginPath();
@@ -702,10 +789,24 @@ class SkyViewer {
         this.ctx.strokeRect(px - 8, py - 8, 16, 16);
         this.ctx.fillText(`👁 ${target.label}`, px + 12, py + 3);
       }
+
+      this.ctx.setLineDash([]);
     }
   }
 
   renderConstellations(w, h) {
+    // In adaptive mode, check if stars should be hidden due to daytime (Sun > -6°) or overcast
+    if (this.skyVisibilityMode === 'adaptive') {
+      if (this.sunAltitude != null && this.sunAltitude > -6.0) {
+        // Daytime: Stars are washed out by daylight
+        return;
+      }
+      if (this.metarData && (this.metarData.cover === 'OVC' || this.metarData.cover === 'VV')) {
+        // Heavy overcast sky obscures celestial stars
+        return;
+      }
+    }
+
     const cx = w / 2;
     const cy = h / 2;
     const rMax = Math.min(w, h) / 2 * 0.98;

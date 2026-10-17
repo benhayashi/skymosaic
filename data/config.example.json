@@ -1,11 +1,15 @@
 {
-  "mode": "feed",
+  "mode": "live_testing",
+  "startup_mode": "live_testing",
+  "auto_record_on_startup": false,
   "observer": {
     "name": "Primary Station",
     "latitude": 40.7128,
     "longitude": -74.006,
     "elevation_m": 10.0,
-    "timezone_str": "UTC"
+    "timezone_str": "UTC",
+    "metar_airport_code": "",
+    "sky_visibility_mode": "adaptive"
   },
   "cameras": [
     {

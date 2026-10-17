@@ -11,7 +11,11 @@ from backend.astrometry.camera_model import (
     project_world_point_to_camera,
 )
 from backend.astrometry.celestial import get_all_celestial_objects, get_sun_coordinates
-from backend.config import ObserverConfig, OperatingMode, SkyViewConfig, TrackingConfig
+from backend.plugins.metar_service import (
+    fetch_metar,
+    evaluate_aircraft_visibility,
+    evaluate_celestial_visibility,
+)
 from backend.plugins.object_detection_plugin import ObjectDetectionPlugin
 from backend.plugins.weather_plugin import WeatherClassifierPlugin
 from backend.stitching.warp_lut import point_in_polygon
@@ -269,29 +273,57 @@ class OpticalTrackerEngine:
         # 5. Hierarchical Object Classification
         classified_targets = []
 
-        # A) Add known prominent celestial objects (Planets & bright stars)
+        metar = None
+        if obs.metar_airport_code:
+            metar = fetch_metar(obs.metar_airport_code)
+
+        # A) Add known prominent celestial objects (Sun, Moon, Planets & bright stars)
         for obj in visible_celestial:
-            if obj.get("mag", 5.0) <= 1.0 or obj.get("type") in ("planet", "moon"):
+            is_sun_moon = obj.get("type") in ("sun", "moon") or obj.get("id") in ("sun", "moon")
+            is_prominent = is_sun_moon or obj.get("mag", 5.0) <= 1.0 or obj.get("type") == "planet"
+            if is_prominent:
+                vis_eval = evaluate_celestial_visibility(
+                    sun_alt_deg=sun_info["altitude_deg"],
+                    obj_type="moon" if is_sun_moon else "star",
+                    metar=metar,
+                    mode=obs.sky_visibility_mode
+                )
+                if not vis_eval["visible"] and obs.sky_visibility_mode == "adaptive":
+                    continue
+
                 pt = self.altaz_to_pixel(obj["altitude_deg"], obj["azimuth_deg"], w, h)
                 if pt and 0 <= pt[0] < w and 0 <= pt[1] < h:
+                    color = "#fbbf24" if is_sun_moon else "#facc15"
                     classified_targets.append({
                         "id": f"cel_{obj['id']}",
                         "category": "celestial",
                         "subtype": obj.get("type", "star"),
-                        "label": f"{obj['name']} ({obj.get('mag', '')}m)",
+                        "label": f"{obj['name']} ({obj.get('mag', '')}m)" if "mag" in obj else obj["name"],
                         "pixel_x": round(pt[0], 1),
                         "pixel_y": round(pt[1], 1),
                         "altitude_deg": obj["altitude_deg"],
                         "azimuth_deg": obj["azimuth_deg"],
                         "speed_deg_s": 0.0,
-                        "color": "#facc15",  # Yellow
+                        "color": color,
+                        "visible": vis_eval["visible"],
+                        "visibility_status": "visible",
+                        "visibility_reason": vis_eval["reason"],
                         "telemetry": obj
                     })
 
-        # B) Add known ADS-B Aircraft projected onto dome
+        # B) Add known ADS-B Aircraft projected onto dome (with METAR adaptive visibility)
+
         for ac in visible_aircraft:
             pt = self.altaz_to_pixel(ac["altitude_deg"], ac["azimuth_deg"], w, h)
             if pt and 0 <= pt[0] < w and 0 <= pt[1] < h:
+                dist_km = ac.get("range_km", 0.0)
+                dist_mi = dist_km * 0.621371
+                vis_eval = evaluate_aircraft_visibility(
+                    distance_miles=dist_mi,
+                    altitude_ft=ac.get("altitude_ft"),
+                    metar=metar,
+                    mode=obs.sky_visibility_mode
+                )
                 classified_targets.append({
                     "id": f"adsb_{ac['id']}",
                     "category": "airplane",
@@ -303,14 +335,25 @@ class OpticalTrackerEngine:
                     "azimuth_deg": ac["azimuth_deg"],
                     "speed_kts": ac["speed_kts"],
                     "speed_deg_s": round(ac["speed_kts"] * 0.514 / max(100.0, ac["range_km"] * 1000.0) * 57.3, 2),
-                    "color": "#06b6d4",  # Cyan
+                    "color": "#06b6d4" if vis_eval["visible"] else "#64748b",
+                    "visible": vis_eval["visible"],
+                    "visibility_status": vis_eval["status"],
+                    "visibility_reason": vis_eval["reason"],
+                    "range_miles": round(dist_mi, 1),
+                    "range_km": round(dist_km, 1),
                     "telemetry": ac
                 })
 
-        # C) Add active orbiting Satellites
+        # C) Add active orbiting Satellites (with celestial visibility evaluation)
         for sat in visible_satellites:
             pt = self.altaz_to_pixel(sat["altitude_deg"], sat["azimuth_deg"], w, h)
             if pt and 0 <= pt[0] < w and 0 <= pt[1] < h:
+                vis_eval = evaluate_celestial_visibility(
+                    sun_alt_deg=sun_info["altitude_deg"],
+                    obj_type="satellite",
+                    metar=metar,
+                    mode=obs.sky_visibility_mode
+                )
                 classified_targets.append({
                     "id": f"sat_{sat['id']}",
                     "category": "satellite",
@@ -321,7 +364,10 @@ class OpticalTrackerEngine:
                     "altitude_deg": sat["altitude_deg"],
                     "azimuth_deg": sat["azimuth_deg"],
                     "speed_deg_s": sat["angular_speed_deg_s"],
-                    "color": "#c084fc",  # Purple
+                    "color": "#c084fc" if vis_eval["visible"] else "#64748b",
+                    "visible": vis_eval["visible"],
+                    "visibility_status": "visible" if vis_eval["visible"] else "obscured",
+                    "visibility_reason": vis_eval["reason"],
                     "telemetry": sat
                 })
 
@@ -447,6 +493,8 @@ class OpticalTrackerEngine:
             "mode": self.config.mode.value,
             "sky_state": sun_info["sky_state"],
             "weather": weather_output,
+            "metar": metar,
+            "sky_visibility_mode": obs.sky_visibility_mode,
             "canvas_width": w,
             "canvas_height": h,
             "adsb_status": self.adsb_tracker.get_status(),

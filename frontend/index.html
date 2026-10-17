@@ -575,6 +575,53 @@
               </div>
             </div>
           </div>
+
+          <div class="form-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+            <div class="form-group col-12">
+              <label class="toggle-checkbox" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="set-auto-record-startup">
+                <span style="font-weight:600; color:var(--text-bright);">Auto-record upon system restart</span>
+              </label>
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">
+                When unchecked (default recommended for testing/pi), system always boots into non-recording Test Preview mode to protect disk space.
+              </small>
+            </div>
+          </div>
+        </div>
+
+        <div class="card settings-card">
+          <div class="section-title-row">
+            <h2>Aviation Weather (METAR) & Adaptive Sky Visibility</h2>
+            <div id="metar-status-badge" class="badge-pill" style="background:var(--bg-surface-elevated);border:1px solid var(--border-color);">No Station Configured</div>
+          </div>
+          <p class="card-caption">Fetch real-time aviation weather reports (METAR) from nearby airports to calculate cloud coverage, ceiling heights, and atmospheric visibility for adaptive star/aircraft rendering.</p>
+
+          <div class="form-row">
+            <div class="form-group col-4">
+              <label for="set-metar-icao">Airport ICAO Code</label>
+              <div style="display:flex;gap:6px;">
+                <input type="text" id="set-metar-icao" class="form-control" placeholder="e.g. KORD, KJFK, EGLL" maxlength="8" style="text-transform:uppercase;font-family:var(--font-mono);">
+                <button type="button" id="btn-test-metar" class="btn btn-secondary btn-sm" style="white-space:nowrap;">Test METAR</button>
+              </div>
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">4-character ICAO code for local airfield/airport.</small>
+            </div>
+
+            <div class="form-group col-4">
+              <label for="set-sky-visibility-mode">Sky Dome Visibility Mode</label>
+              <select id="set-sky-visibility-mode" class="form-control">
+                <option value="adaptive" selected>Adaptive (Conditions Allow — Hides stars during daylight/overcast, dims obscured aircraft)</option>
+                <option value="always">Show All the Time (Unfiltered — Always display stars, satellites & aircraft)</option>
+              </select>
+              <small style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;display:block;">Sun and Moon always remain visible in both modes.</small>
+            </div>
+
+            <div class="form-group col-4">
+              <label>Current METAR Report</label>
+              <div id="metar-readout-box" style="background:rgba(15,23,42,0.8);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim);min-height:38px;line-height:1.4;">
+                <span id="metar-summary-text">No airport set</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="card settings-card">

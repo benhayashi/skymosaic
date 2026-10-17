@@ -33,6 +33,8 @@ class ObserverConfig(BaseModel):
     longitude: float = Field(default=-74.0060, description="Longitude in decimal degrees (+ East, - West)")
     elevation_m: float = Field(default=10.0, description="Elevation above sea level in meters")
     timezone_str: str = Field(default="UTC", description="Observer timezone string, e.g. UTC or America/New_York")
+    metar_airport_code: str = Field(default="", description="ICAO airport code (e.g. KORD, KJFK) for live aviation weather")
+    sky_visibility_mode: str = Field(default="adaptive", description="'adaptive' (show when conditions allow) or 'always' (show all the time)")
 
 
 class CameraExtrinsics(BaseModel):
@@ -187,6 +189,7 @@ class PipelineConfig(BaseModel):
 class SkyViewConfig(BaseModel):
     mode: OperatingMode = Field(default=OperatingMode.FEED, description="Operating mode: 'feed', 'long_exposure', or 'live_testing'")
     startup_mode: OperatingMode = Field(default=OperatingMode.LIVE_TESTING, description="Default operating mode on startup (e.g. 'live_testing', 'feed', 'long_exposure')")
+    auto_record_on_startup: bool = Field(default=False, description="Automatically start recording or archiving upon system reboot. When false, system starts in non-recording preview mode.")
     observer: ObserverConfig = Field(default_factory=ObserverConfig)
     cameras: List[CameraConfig] = Field(default_factory=list)
     stitching: StitchingConfig = Field(default_factory=StitchingConfig)

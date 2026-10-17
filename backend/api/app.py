@@ -41,8 +41,10 @@ from backend.tracking.optical_tracker import OpticalTrackerEngine
 # Global application state
 CONFIG_PATH = os.environ.get("SKYMOSAIC_CONFIG", "data/config.json")
 app_config: SkyViewConfig = load_config(CONFIG_PATH)
-# Apply startup mode preference on boot (default live_testing / test preview)
-if app_config.startup_mode:
+# Apply startup mode preference on boot (default live_testing / non-recording preview mode)
+if not getattr(app_config, "auto_record_on_startup", False):
+    app_config.mode = OperatingMode.LIVE_TESTING
+elif app_config.startup_mode:
     app_config.mode = app_config.startup_mode
 stream_manager = StreamManager(app_config)
 stitcher = MultiCameraStitcher(app_config)
@@ -210,6 +212,9 @@ def trigger_ntp_sync(req: Optional[NTPSyncRequest] = None):
 
 
 
+from backend.plugins.metar_service import fetch_metar
+
+
 @app.get("/api/weather/sky_conditions")
 def get_sky_conditions():
     composite = composite_worker.get_clean_composite()
@@ -223,10 +228,26 @@ def get_sky_conditions():
             "is_day": sun_info["sky_state"] == "day"
         }
     )
+    metar = None
+    if app_config.observer.metar_airport_code:
+        metar = fetch_metar(app_config.observer.metar_airport_code)
     return {
         "sun": sun_info,
-        "weather": weather
+        "weather": weather,
+        "metar": metar,
+        "sky_visibility_mode": getattr(app_config.observer, "sky_visibility_mode", "adaptive"),
     }
+
+
+@app.get("/api/weather/metar")
+def get_metar(icao: Optional[str] = None):
+    code = (icao or app_config.observer.metar_airport_code or "").strip().upper()
+    if not code:
+        return {"status": "no_airport_code", "metar": None}
+    metar = fetch_metar(code)
+    if not metar:
+        return {"status": "not_found", "icao": code, "metar": None}
+    return {"status": "ok", "icao": code, "metar": metar}
 
 
 @app.get("/api/events/unidentified")

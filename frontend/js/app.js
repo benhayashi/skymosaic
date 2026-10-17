@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initModalEvents();
   initModeSwitcher();
   initGeolocationControls();
+  initMetarTester();
   startTrackingPoller();
 
   // Start live sky view
@@ -985,6 +986,13 @@ function startTrackingPoller() {
       if (weatherRes.ok) {
         const data = await weatherRes.json();
         updateWeatherBanner(data.weather, data.sun);
+        skyViewer.setWeatherConditions({
+          sun_altitude: data.sun?.altitude_deg,
+          metar: data.metar,
+          weather: data.weather,
+          sky_visibility_mode: data.sky_visibility_mode
+        });
+        updateMetarStatusCard(data.metar);
       }
     } catch (e) {
       // Quiet fail during network reloads
@@ -1049,16 +1057,33 @@ function updateTargetsList(targets) {
     if (t.speed_kts) {
       extraInfo += ` | ${formatSpeed(t.speed_kts)}`;
     }
-    if (t.telemetry && t.telemetry.range_km != null) {
-      extraInfo += ` | Range: ${formatRange(t.telemetry.range_km)}`;
+    if (t.telemetry && (t.telemetry.range_miles != null || t.telemetry.range_km != null)) {
+      const rangeDist = (currentUnitSystem === 'us' && t.telemetry.range_miles != null)
+        ? `${t.telemetry.range_miles.toFixed(1)} mi`
+        : formatRange(t.telemetry.range_km != null ? t.telemetry.range_km : (t.telemetry.range_miles * 1.60934));
+      extraInfo += ` | Dist: ${rangeDist}`;
     }
     if (t.speed_deg_s > 0) {
       extraInfo += ` | ${t.speed_deg_s}°/s`;
     }
 
+    // Visual Range Status Badge
+    let visibilityBadge = '';
+    if (t.visibility_status) {
+      if (t.visible === false || t.visibility_status === 'obscured') {
+        const reason = t.visibility_reason ? ` title="${t.visibility_reason}"` : '';
+        visibilityBadge = `<span class="badge-pill" style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);font-size:0.65rem;"${reason}>☁ Obscured</span>`;
+      } else if (t.visibility_status === 'visible') {
+        visibilityBadge = `<span class="badge-pill" style="background:rgba(34,197,94,0.15);color:#4ade80;border:1px solid rgba(34,197,94,0.3);font-size:0.65rem;">🟢 In Visual Range</span>`;
+      }
+    }
+
     row.innerHTML = `
-      <div>
-        <div style="font-weight:600;">${icon} ${t.label}</div>
+      <div style="flex:1;">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;">
+          <span>${icon} ${t.label}</span>
+          ${visibilityBadge}
+        </div>
         <div class="target-meta-sub">${extraInfo}</div>
       </div>
       <span class="badge-pill" style="background:${t.color};color:#000;">${t.category.toUpperCase()}</span>
@@ -1182,6 +1207,21 @@ function populateSettingsForm() {
   if (startupSelect) {
     startupSelect.value = appConfig.startup_mode || 'live_testing';
   }
+  const autoRecordCheckbox = document.getElementById('set-auto-record-startup');
+  if (autoRecordCheckbox) {
+    autoRecordCheckbox.checked = !!appConfig.auto_record_on_startup;
+  }
+
+  // Aviation Weather (METAR)
+  const metarIcaoInput = document.getElementById('set-metar-icao');
+  if (metarIcaoInput) {
+    metarIcaoInput.value = appConfig.observer?.metar_airport_code || '';
+  }
+  const skyVisSelect = document.getElementById('set-sky-visibility-mode');
+  if (skyVisSelect) {
+    skyVisSelect.value = appConfig.observer?.sky_visibility_mode || 'adaptive';
+  }
+
   const runningModeLabel = document.getElementById('label-current-running-mode');
   if (runningModeLabel) {
     const cur = appConfig.mode || 'live_testing';
@@ -1476,10 +1516,27 @@ function initSettingsEvents() {
   document.getElementById('btn-save-all-settings')?.addEventListener('click', async () => {
     if (!appConfig) return;
 
-    // Save startup operating mode
+    // Save startup operating mode & auto-record setting
     const startupSelect = document.getElementById('set-startup-mode');
     if (startupSelect) {
       appConfig.startup_mode = startupSelect.value;
+    }
+    const autoRecEl = document.getElementById('set-auto-record-startup');
+    if (autoRecEl) {
+      appConfig.auto_record_on_startup = autoRecEl.checked;
+    }
+
+    if (!appConfig.observer) appConfig.observer = {};
+    const icaoInput = document.getElementById('set-metar-icao');
+    if (icaoInput) {
+      appConfig.observer.metar_airport_code = icaoInput.value.trim().toUpperCase();
+    }
+    const skyVisEl = document.getElementById('set-sky-visibility-mode');
+    if (skyVisEl) {
+      appConfig.observer.sky_visibility_mode = skyVisEl.value;
+      if (skyViewer) {
+        skyViewer.skyVisibilityMode = skyVisEl.value;
+      }
     }
 
     appConfig.observer.latitude = parseFloat(document.getElementById('set-lat').value);
@@ -2085,4 +2142,79 @@ function updateTelemetry() {
   document.getElementById('tel-proj').textContent =
     appConfig.stitching.projection === 'zenithal_polar' ? 'Zenithal Polar Dome' : 'Equirectangular Panorama';
 }
+
+function updateMetarStatusCard(metar) {
+  const badge = document.getElementById('metar-status-badge');
+  const summary = document.getElementById('metar-summary-text');
+  if (!metar || !metar.station) {
+    if (badge) {
+      badge.textContent = 'No Station Configured';
+      badge.style.color = 'var(--text-dim)';
+      badge.style.borderColor = 'var(--border-color)';
+    }
+    if (summary) summary.textContent = 'No airport set. Enter a 4-letter ICAO code above.';
+    return;
+  }
+
+  if (badge) {
+    badge.textContent = `${metar.station} (${metar.flt_cat || 'VFR'})`;
+    if (metar.flt_cat === 'LIFR' || metar.flt_cat === 'IFR') {
+      badge.style.color = '#ef4444';
+      badge.style.borderColor = 'rgba(239,68,68,0.4)';
+    } else if (metar.flt_cat === 'MVFR') {
+      badge.style.color = '#f59e0b';
+      badge.style.borderColor = 'rgba(245,158,11,0.4)';
+    } else {
+      badge.style.color = '#22c55e';
+      badge.style.borderColor = 'rgba(34,197,94,0.4)';
+    }
+  }
+
+  if (summary) {
+    const visStr = metar.visibility_statute_miles != null ? `${metar.visibility_statute_miles} sm vis` : 'vis unk';
+    const ceilStr = metar.ceiling_ft != null ? `Ceiling ${metar.ceiling_ft}ft` : 'No ceiling';
+    const tempStr = metar.temperature_c != null ? `${metar.temperature_c}°C` : '';
+    const raw = metar.raw_observation ? `\nRAW: ${metar.raw_observation}` : '';
+    summary.innerText = `${metar.station} • ${metar.cover} • ${ceilStr} • ${visStr} • ${tempStr}${raw}`;
+  }
+}
+
+function initMetarTester() {
+  const testBtn = document.getElementById('btn-test-metar');
+  const icaoInput = document.getElementById('set-metar-icao');
+  if (!testBtn || !icaoInput) return;
+
+  testBtn.addEventListener('click', async () => {
+    const icao = icaoInput.value.trim().toUpperCase();
+    if (!icao) {
+      showToast('Please enter an airport ICAO code (e.g. KORD, KJFK)', 'error');
+      return;
+    }
+
+    testBtn.disabled = true;
+    testBtn.textContent = 'Fetching...';
+
+    try {
+      const res = await fetch(`/api/weather/metar?icao=${encodeURIComponent(icao)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to retrieve METAR data');
+      }
+
+      updateMetarStatusCard(data);
+      if (skyViewer) {
+        skyViewer.setWeatherConditions({ metar: data });
+      }
+      showToast(`METAR loaded for ${icao}: ${data.cover}, ${data.flight_category || data.flt_cat || 'OK'}`, 'success');
+    } catch (e) {
+      showToast(e.message || 'Error fetching METAR', 'error');
+      const summary = document.getElementById('metar-summary-text');
+      if (summary) summary.textContent = `Error: ${e.message}`;
+    } finally {
+      testBtn.disabled = false;
+      testBtn.textContent = 'Test METAR';
+    }
+  });
+}
+
 
