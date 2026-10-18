@@ -113,16 +113,6 @@ class SyntheticSkyCamera:
             # Ground ambient sodium lighting glow on edge
             cv2.polylines(frame, [ground_pts[1:-1]], False, (10, 15, 25), 2, cv2.LINE_AA)
 
-        # Apply flips if configured
-        flip_h = getattr(self.camera_cfg, "flip_horizontal", False)
-        flip_v = getattr(self.camera_cfg, "flip_vertical", False)
-        if flip_h and flip_v:
-            frame = cv2.flip(frame, -1)
-        elif flip_h:
-            frame = cv2.flip(frame, 1)
-        elif flip_v:
-            frame = cv2.flip(frame, 0)
-
         return frame
 
 
@@ -189,7 +179,7 @@ class CameraStreamHandler:
                     if self.camera_cfg.source_type == CameraSourceType.SYNTHETIC:
                         sim_frame = self._synthetic_sim.render_frame()
                         with self._lock:
-                            self.latest_frame = self._apply_flips(sim_frame)
+                            self.latest_frame = sim_frame
                         time.sleep(0.1)  # ~10 FPS for simulation
 
                     elif self.camera_cfg.source_type == CameraSourceType.DIRECTORY:
@@ -204,7 +194,7 @@ class CameraStreamHandler:
                                 img = cv2.imread(str(latest_file))
                                 if img is not None:
                                     with self._lock:
-                                        self.latest_frame = self._apply_flips(img)
+                                        self.latest_frame = img
                         time.sleep(1.0)
 
                     elif self.camera_cfg.source_type in (CameraSourceType.RTSP, CameraSourceType.USB):
@@ -215,9 +205,8 @@ class CameraStreamHandler:
 
                         ret, frame = self._cap.read()
                         if ret and frame is not None:
-                            flipped = self._apply_flips(frame)
                             with self._lock:
-                                self.latest_frame = flipped
+                                self.latest_frame = frame
                         else:
                             time.sleep(1.0)
                             if self._cap:
@@ -235,16 +224,18 @@ class CameraStreamHandler:
                     pass
                 self._cap = None
 
-    def get_frame(self) -> Optional[np.ndarray]:
+    def get_frame(self, apply_flips: bool = False) -> Optional[np.ndarray]:
         with self._lock:
+            frame = None
             if self.latest_frame is not None:
-                return self.latest_frame.copy()
-            if self._synthetic_sim is not None:
+                frame = self.latest_frame.copy()
+            elif self._synthetic_sim is not None:
                 frame = self._synthetic_sim.render_frame()
-                frame = self._apply_flips(frame)
                 self.latest_frame = frame
-                return frame.copy()
-            return None
+                frame = frame.copy()
+            if frame is not None and apply_flips:
+                frame = self._apply_flips(frame)
+            return frame
 
 
 class StreamManager:
@@ -302,10 +293,10 @@ class StreamManager:
         for handler in self.handlers.values():
             handler.stop()
 
-    def get_camera_frame(self, camera_id: str) -> Optional[np.ndarray]:
+    def get_camera_frame(self, camera_id: str, apply_flips: bool = False) -> Optional[np.ndarray]:
         handler = self.handlers.get(camera_id)
         if handler:
-            return handler.get_frame()
+            return handler.get_frame(apply_flips=apply_flips)
         return None
 
     def get_all_active_frames(self) -> Dict[str, np.ndarray]:

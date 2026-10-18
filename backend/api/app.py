@@ -337,8 +337,8 @@ def delete_camera(camera_id: str):
 
 
 @app.get("/api/cameras/{camera_id}/frame")
-def get_camera_frame(camera_id: str):
-    frame = stream_manager.get_camera_frame(camera_id)
+def get_camera_frame(camera_id: str, flip: bool = False):
+    frame = stream_manager.get_camera_frame(camera_id, apply_flips=flip)
     if frame is None:
         raise HTTPException(status_code=404, detail="Frame not available for this camera.")
     ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])

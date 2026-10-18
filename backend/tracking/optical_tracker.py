@@ -164,6 +164,10 @@ class OpticalTrackerEngine:
             pt = project_world_point_to_camera(v_world, R_w2c, cam.intrinsics, cw, ch)
             if pt is not None:
                 px, py = pt
+                if getattr(cam, "flip_horizontal", False):
+                    px = (cw - 1.0) - px
+                if getattr(cam, "flip_vertical", False):
+                    py = (ch - 1.0) - py
                 norm_x = px / float(cw)
                 norm_y = py / float(ch)
                 if 0.0 <= norm_x <= 1.0 and 0.0 <= norm_y <= 1.0:

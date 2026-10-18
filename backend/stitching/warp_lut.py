@@ -257,6 +257,14 @@ def compute_camera_remap_lut(
         above_horizon = vz_val >= min_sin_alt
         in_bounds = in_bounds & above_horizon
 
+    # Apply horizontal / vertical flip if configured (for dome projection)
+    flip_h = getattr(camera_cfg, "flip_horizontal", False)
+    flip_v = getattr(camera_cfg, "flip_vertical", False)
+    if flip_h:
+        px = (img_w - 1.0) - px
+    if flip_v:
+        py = (img_h - 1.0) - py
+
     # Apply polygon obstacle mask if configured and cutout mode is active (not tracking-only)
     mask_tracking_only = getattr(camera_cfg, "mask_tracking_only", True)
     all_masks = getattr(camera_cfg, "get_all_polygon_masks", lambda: [])()

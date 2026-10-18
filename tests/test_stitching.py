@@ -76,3 +76,42 @@ def test_min_elevation_masking_in_remap_lut():
     assert np.count_nonzero(valid_pixels) > 0
     min_sin = np.sin(np.radians(10.0))
     assert np.all(grid_vz[valid_pixels] >= (min_sin - 1e-4))
+
+
+def test_camera_flip_in_remap_lut():
+    cfg = get_default_config()
+    grid_vx, grid_vy, grid_vz, valid_mask = generate_target_world_grid(cfg.stitching)
+
+    # Standard un-flipped camera
+    cam_normal = CameraConfig(
+        id="cam_norm",
+        name="Norm Cam",
+        flip_horizontal=False,
+        flip_vertical=False,
+        extrinsics=CameraExtrinsics(azimuth_deg=0.0, altitude_deg=45.0, roll_deg=0.0),
+        intrinsics=CameraIntrinsics(lens_model=LensModelType.RECTILINEAR, fov_deg=90.0)
+    )
+    # Horizontally flipped camera
+    cam_flipped = CameraConfig(
+        id="cam_flip",
+        name="Flip Cam",
+        flip_horizontal=True,
+        flip_vertical=False,
+        extrinsics=CameraExtrinsics(azimuth_deg=0.0, altitude_deg=45.0, roll_deg=0.0),
+        intrinsics=CameraIntrinsics(lens_model=LensModelType.RECTILINEAR, fov_deg=90.0)
+    )
+
+    w, h = 640, 480
+    map_x1, map_y1, mask1 = compute_camera_remap_lut(cam_normal, w, h, grid_vx, grid_vy, grid_vz, valid_mask)
+    map_x2, map_y2, mask2 = compute_camera_remap_lut(cam_flipped, w, h, grid_vx, grid_vy, grid_vz, valid_mask)
+
+    # Masks should have the same coverage
+    assert np.array_equal(mask1, mask2)
+    valid_pts = mask1 > 0
+    assert np.count_nonzero(valid_pts) > 0
+
+    # In flipped LUT, map_x should equal (w - 1) - map_x1
+    assert np.allclose(map_x2[valid_pts], (w - 1.0) - map_x1[valid_pts], atol=1e-3)
+    # map_y should remain identical
+    assert np.allclose(map_y2[valid_pts], map_y1[valid_pts], atol=1e-3)
+
