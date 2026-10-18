@@ -277,9 +277,11 @@ function renderCamerasList() {
           <div>Pointing: ${cam.extrinsics.azimuth_deg}° Az, ${cam.extrinsics.altitude_deg}° Alt, ${cam.extrinsics.roll_deg}° Roll</div>
           <div>Lens: ${cam.intrinsics.lens_model} (${cam.intrinsics.fov_deg}° FOV)</div>
         </div>
-        <div class="camera-actions">
+        <div class="camera-actions" style="flex-wrap: wrap;">
           <button class="btn btn-primary btn-sm" style="background:linear-gradient(135deg, #2563eb, #7c3aed);" onclick="quickAutoCalibrateCamera('${cam.id}')">✨ Auto-Solve</button>
           <button class="btn btn-secondary btn-sm" onclick="openCalibrationFor('${cam.id}')">Calibrate</button>
+          <button class="btn btn-outline btn-sm ${cam.flip_horizontal ? 'active' : ''}" style="${cam.flip_horizontal ? 'background:rgba(6,182,212,0.22);border-color:var(--accent-cyan);color:var(--accent-cyan);font-weight:600;' : ''}" title="Mirror camera feed horizontally (left-to-right)" onclick="toggleCameraFlip('${cam.id}', 'horizontal')">↔️ ${cam.flip_horizontal ? 'Flip H: ON' : 'Flip H'}</button>
+          <button class="btn btn-outline btn-sm ${cam.flip_vertical ? 'active' : ''}" style="${cam.flip_vertical ? 'background:rgba(6,182,212,0.22);border-color:var(--accent-cyan);color:var(--accent-cyan);font-weight:600;' : ''}" title="Invert camera feed vertically (upside-down)" onclick="toggleCameraFlip('${cam.id}', 'vertical')">↕️ ${cam.flip_vertical ? 'Flip V: ON' : 'Flip V'}</button>
           <button class="btn btn-outline btn-sm" style="color:var(--accent-danger);" onclick="deleteCameraFeed('${cam.id}')">Delete</button>
         </div>
       </div>
@@ -287,6 +289,28 @@ function renderCamerasList() {
     container.appendChild(card);
   });
 }
+
+window.toggleCameraFlip = async function(cameraId, axis) {
+  try {
+    const res = await fetch(`/api/cameras/${cameraId}/flip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ axis: axis })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const stateH = data.flip_horizontal ? 'ON' : 'OFF';
+      const stateV = data.flip_vertical ? 'ON' : 'OFF';
+      showToast(`Camera flipped! H-Flip: ${stateH}, V-Flip: ${stateV}`, 'success');
+      await loadCameras();
+      skyViewer.render();
+    } else {
+      showToast('Failed to toggle camera flip', 'error');
+    }
+  } catch (err) {
+    showToast(`Error toggling camera flip: ${err.message}`, 'error');
+  }
+};
 
 window.quickAutoCalibrateCamera = async function(cameraId) {
   const target = camerasList.find(c => c.config.id === cameraId);
@@ -429,6 +453,13 @@ function initCalibrationEvents() {
   document.getElementById('calib-toggle-mask')?.addEventListener('change', (e) => {
     calibrationStudio.showMask = e.target.checked;
     calibrationStudio.render();
+  });
+
+  document.getElementById('calib-flip-h')?.addEventListener('change', (e) => {
+    calibrationStudio.flipH = e.target.checked;
+  });
+  document.getElementById('calib-flip-v')?.addEventListener('change', (e) => {
+    calibrationStudio.flipV = e.target.checked;
   });
 
   // Star Matching
@@ -590,6 +621,8 @@ function initCalibrationEvents() {
     cam.polygon_masks = calibrationStudio.obstacles.map(o => o.points);
     cam.polygon_mask = calibrationStudio.obstacles.length > 0 ? [...calibrationStudio.obstacles[0].points] : [];
     cam.mask_tracking_only = document.getElementById('calib-mask-tracking-only')?.checked ?? true;
+    cam.flip_horizontal = calibrationStudio.flipH ?? false;
+    cam.flip_vertical = calibrationStudio.flipV ?? false;
 
     try {
       const res = await fetch(`/api/cameras/${cam.id}`, {
@@ -1817,6 +1850,9 @@ function initModalEvents() {
       submitBtn.textContent = 'Adding...';
     }
 
+    const flipH = document.getElementById('new-cam-flip-h')?.checked ?? false;
+    const flipV = document.getElementById('new-cam-flip-v')?.checked ?? false;
+
     const newCam = {
       id: id,
       name: name,
@@ -1825,7 +1861,9 @@ function initModalEvents() {
       enabled: true,
       extrinsics: { azimuth_deg: az, altitude_deg: alt, roll_deg: 0.0 },
       intrinsics: { lens_model: 'rectilinear', fov_deg: 85.0, fov_axis: 'horizontal', k1: 0.0 },
-      polygon_mask: []
+      polygon_mask: [],
+      flip_horizontal: flipH,
+      flip_vertical: flipV
     };
 
     try {

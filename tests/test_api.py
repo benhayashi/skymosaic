@@ -102,3 +102,18 @@ def test_api_unidentified_events():
     assert "events" in data
     assert "count" in data
 
+
+def test_api_camera_flip():
+    # Toggle horizontal flip for cam_north
+    res = client.post("/api/cameras/cam_north/flip", json={"axis": "horizontal"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert data["flip_horizontal"] is True
+
+    # Toggle back to false
+    res2 = client.post("/api/cameras/cam_north/flip", json={"axis": "horizontal"})
+    assert res2.status_code == 200
+    assert res2.json()["flip_horizontal"] is False
+
+

@@ -77,6 +77,8 @@ class CameraConfig(BaseModel):
     )
     gain_scale: float = Field(default=1.0, description="Brightness gain multiplier for exposure matching")
     min_elevation_deg: float = Field(default=0.0, description="Minimum elevation angle in degrees; points below this are masked out (removes ground/roads/cars)")
+    flip_horizontal: bool = Field(default=False, description="Flip camera input horizontally (mirror left-to-right)")
+    flip_vertical: bool = Field(default=False, description="Flip camera input vertically (invert upside-down)")
 
     def get_all_polygon_masks(self) -> List[List[List[float]]]:
         """Returns consolidated list of all obstacle polygons for this camera."""

@@ -113,6 +113,16 @@ class SyntheticSkyCamera:
             # Ground ambient sodium lighting glow on edge
             cv2.polylines(frame, [ground_pts[1:-1]], False, (10, 15, 25), 2, cv2.LINE_AA)
 
+        # Apply flips if configured
+        flip_h = getattr(self.camera_cfg, "flip_horizontal", False)
+        flip_v = getattr(self.camera_cfg, "flip_vertical", False)
+        if flip_h and flip_v:
+            frame = cv2.flip(frame, -1)
+        elif flip_h:
+            frame = cv2.flip(frame, 1)
+        elif flip_v:
+            frame = cv2.flip(frame, 0)
+
         return frame
 
 
@@ -159,6 +169,19 @@ class CameraStreamHandler:
             return self._cap.isOpened()
         return True
 
+    def _apply_flips(self, frame: Optional[np.ndarray]) -> Optional[np.ndarray]:
+        if frame is None:
+            return None
+        flip_h = getattr(self.camera_cfg, "flip_horizontal", False)
+        flip_v = getattr(self.camera_cfg, "flip_vertical", False)
+        if flip_h and flip_v:
+            return cv2.flip(frame, -1)
+        elif flip_h:
+            return cv2.flip(frame, 1)
+        elif flip_v:
+            return cv2.flip(frame, 0)
+        return frame
+
     def _capture_loop(self) -> None:
         try:
             while self._running:
@@ -166,7 +189,7 @@ class CameraStreamHandler:
                     if self.camera_cfg.source_type == CameraSourceType.SYNTHETIC:
                         sim_frame = self._synthetic_sim.render_frame()
                         with self._lock:
-                            self.latest_frame = sim_frame
+                            self.latest_frame = self._apply_flips(sim_frame)
                         time.sleep(0.1)  # ~10 FPS for simulation
 
                     elif self.camera_cfg.source_type == CameraSourceType.DIRECTORY:
@@ -181,7 +204,7 @@ class CameraStreamHandler:
                                 img = cv2.imread(str(latest_file))
                                 if img is not None:
                                     with self._lock:
-                                        self.latest_frame = img
+                                        self.latest_frame = self._apply_flips(img)
                         time.sleep(1.0)
 
                     elif self.camera_cfg.source_type in (CameraSourceType.RTSP, CameraSourceType.USB):
@@ -192,8 +215,9 @@ class CameraStreamHandler:
 
                         ret, frame = self._cap.read()
                         if ret and frame is not None:
+                            flipped = self._apply_flips(frame)
                             with self._lock:
-                                self.latest_frame = frame
+                                self.latest_frame = flipped
                         else:
                             time.sleep(1.0)
                             if self._cap:
@@ -217,6 +241,7 @@ class CameraStreamHandler:
                 return self.latest_frame.copy()
             if self._synthetic_sim is not None:
                 frame = self._synthetic_sim.render_frame()
+                frame = self._apply_flips(frame)
                 self.latest_frame = frame
                 return frame.copy()
             return None

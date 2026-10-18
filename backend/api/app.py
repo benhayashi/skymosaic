@@ -284,6 +284,32 @@ def add_camera(camera: CameraConfig):
     return {"status": "ok", "camera": camera}
 
 
+class FlipCameraRequest(BaseModel):
+    axis: str = "horizontal"  # "horizontal", "vertical", or "both"
+
+
+@app.post("/api/cameras/{camera_id}/flip")
+def flip_camera(camera_id: str, req: Optional[FlipCameraRequest] = None):
+    axis = req.axis if req else "horizontal"
+    for i, cam in enumerate(app_config.cameras):
+        if cam.id == camera_id:
+            if axis in ("horizontal", "both"):
+                cam.flip_horizontal = not cam.flip_horizontal
+            if axis in ("vertical", "both"):
+                cam.flip_vertical = not cam.flip_vertical
+            save_config(app_config, CONFIG_PATH)
+            stream_manager.update_config(app_config)
+            stitcher.update_config(app_config)
+            tracker_engine.update_config(app_config)
+            return {
+                "status": "ok",
+                "flip_horizontal": cam.flip_horizontal,
+                "flip_vertical": cam.flip_vertical,
+                "camera": cam
+            }
+    raise HTTPException(status_code=404, detail="Camera not found.")
+
+
 @app.put("/api/cameras/{camera_id}")
 def update_camera(camera_id: str, updated_cam: CameraConfig):
     for i, cam in enumerate(app_config.cameras):

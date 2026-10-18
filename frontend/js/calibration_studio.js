@@ -14,6 +14,8 @@ class CalibrationStudio {
     this.lensModel = 'rectilinear';
     this.k1 = 0.0;
     this.polygonMask = [];
+    this.flipH = false;
+    this.flipV = false;
 
     // Astrometry data
     this.stars = [];
@@ -124,6 +126,8 @@ class CalibrationStudio {
     this.lensModel = camera.intrinsics.lens_model;
     this.k1 = camera.intrinsics.k1 || 0.0;
     this.maskTrackingOnly = camera.mask_tracking_only !== undefined ? camera.mask_tracking_only : true;
+    this.flipH = camera.flip_horizontal ?? false;
+    this.flipV = camera.flip_vertical ?? false;
 
     // Load multi-obstacle polygons
     this.obstacles = [];
@@ -174,6 +178,11 @@ class CalibrationStudio {
 
     document.getElementById('slider-k1').value = this.k1;
     document.getElementById('val-k1').textContent = this.k1.toFixed(2);
+
+    const chkH = document.getElementById('calib-flip-h');
+    if (chkH) chkH.checked = this.flipH;
+    const chkV = document.getElementById('calib-flip-v');
+    if (chkV) chkV.checked = this.flipV;
   }
 
   async loadCameraTestFrame(cameraId) {
