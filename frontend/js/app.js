@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initModeSwitcher();
   initGeolocationControls();
   initMetarTester();
+  initDiagnosticsControls();
   startTrackingPoller();
 
   // Start live sky view
@@ -231,8 +232,21 @@ async function loadCameras() {
     renderMiniCameraList();
     populateCalibrationCameraSelect();
 
-    if (camerasList.length > 0 && !calibrationStudio.activeCamera) {
-      calibrationStudio.setCamera(camerasList[0].config);
+    if (camerasList.length > 0) {
+      if (!calibrationStudio.activeCamera) {
+        calibrationStudio.setCamera(camerasList[0].config);
+      } else {
+        const updated = camerasList.find(c => c.config.id === calibrationStudio.activeCamera.id);
+        if (updated) {
+          calibrationStudio.activeCamera = updated.config;
+          calibrationStudio.flipH = updated.config.flip_horizontal ?? false;
+          calibrationStudio.flipV = updated.config.flip_vertical ?? false;
+          const chkH = document.getElementById('calib-flip-h');
+          if (chkH) chkH.checked = calibrationStudio.flipH;
+          const chkV = document.getElementById('calib-flip-v');
+          if (chkV) chkV.checked = calibrationStudio.flipV;
+        }
+      }
     }
   } catch (e) {
     console.error("Failed to load cameras:", e);
@@ -280,8 +294,8 @@ function renderCamerasList() {
         <div class="camera-actions" style="flex-wrap: wrap;">
           <button class="btn btn-primary btn-sm" style="background:linear-gradient(135deg, #2563eb, #7c3aed);" onclick="quickAutoCalibrateCamera('${cam.id}')">✨ Auto-Solve</button>
           <button class="btn btn-secondary btn-sm" onclick="openCalibrationFor('${cam.id}')">Calibrate</button>
-          <button class="btn btn-outline btn-sm ${cam.flip_horizontal ? 'active' : ''}" style="${cam.flip_horizontal ? 'background:rgba(6,182,212,0.22);border-color:var(--accent-cyan);color:var(--accent-cyan);font-weight:600;' : ''}" title="Mirror camera projection on sky dome horizontally (left-to-right)" onclick="toggleCameraFlip('${cam.id}', 'horizontal')">↔️ ${cam.flip_horizontal ? 'Flip H: ON' : 'Flip H'}</button>
-          <button class="btn btn-outline btn-sm ${cam.flip_vertical ? 'active' : ''}" style="${cam.flip_vertical ? 'background:rgba(6,182,212,0.22);border-color:var(--accent-cyan);color:var(--accent-cyan);font-weight:600;' : ''}" title="Invert camera projection on sky dome vertically (upside-down)" onclick="toggleCameraFlip('${cam.id}', 'vertical')">↕️ ${cam.flip_vertical ? 'Flip V: ON' : 'Flip V'}</button>
+          <button class="btn btn-outline btn-sm ${cam.flip_horizontal ? 'active' : ''}" style="${cam.flip_horizontal ? 'background:rgba(6,182,212,0.22);border-color:var(--accent-cyan);color:var(--accent-cyan);font-weight:600;' : ''}" title="Mirror camera projection on sky dome horizontally (left-to-right)" onclick="toggleCameraFlip('${cam.id}', 'horizontal', this)">↔️ ${cam.flip_horizontal ? 'Flip H: ON' : 'Flip H'}</button>
+          <button class="btn btn-outline btn-sm ${cam.flip_vertical ? 'active' : ''}" style="${cam.flip_vertical ? 'background:rgba(6,182,212,0.22);border-color:var(--accent-cyan);color:var(--accent-cyan);font-weight:600;' : ''}" title="Invert camera projection on sky dome vertically (upside-down)" onclick="toggleCameraFlip('${cam.id}', 'vertical', this)">↕️ ${cam.flip_vertical ? 'Flip V: ON' : 'Flip V'}</button>
           <button class="btn btn-outline btn-sm" style="color:var(--accent-danger);" onclick="deleteCameraFeed('${cam.id}')">Delete</button>
         </div>
       </div>
@@ -290,7 +304,11 @@ function renderCamerasList() {
   });
 }
 
-window.toggleCameraFlip = async function(cameraId, axis) {
+window.toggleCameraFlip = async function(cameraId, axis, btnElement) {
+  if (btnElement) {
+    btnElement.disabled = true;
+    btnElement.style.opacity = '0.5';
+  }
   try {
     const res = await fetch(`/api/cameras/${cameraId}/flip`, {
       method: 'POST',
@@ -304,12 +322,16 @@ window.toggleCameraFlip = async function(cameraId, axis) {
       showToast(`Camera flipped! H-Flip: ${stateH}, V-Flip: ${stateV}`, 'success');
       await loadCameras();
       skyViewer?.fetchFrame();
-      skyViewer?.render();
     } else {
       showToast('Failed to toggle camera flip', 'error');
     }
   } catch (err) {
     showToast(`Error toggling camera flip: ${err.message}`, 'error');
+  } finally {
+    if (btnElement) {
+      btnElement.disabled = false;
+      btnElement.style.opacity = '1.0';
+    }
   }
 };
 
@@ -781,7 +803,8 @@ function initActionButtons() {
                      camerasList.find(c => c.config.enabled) ||
                      camerasList[0];
     if (targetCam) {
-      await window.toggleCameraFlip(targetCam.config.id, 'horizontal');
+      const btn = document.getElementById('btn-quick-flip-feed');
+      await window.toggleCameraFlip(targetCam.config.id, 'horizontal', btn);
     } else {
       showToast('No cameras configured to flip', 'warning');
     }
@@ -2280,5 +2303,112 @@ function initMetarTester() {
     }
   });
 }
+
+function initDiagnosticsControls() {
+  const diagEnv = document.getElementById('diag-app-env');
+  const diagArch = document.getElementById('diag-host-arch');
+  const diagUptime = document.getElementById('diag-uptime');
+  const btnCopy = document.getElementById('btn-copy-diagnostics');
+  const btnDownloadDiag = document.getElementById('btn-download-diagnostics');
+  const btnToggleLogs = document.getElementById('btn-toggle-view-logs');
+  const btnDownloadLogs = document.getElementById('btn-download-logs');
+  const btnRefreshLogs = document.getElementById('btn-refresh-logs');
+  const containerLogs = document.getElementById('container-live-logs');
+  const preLogs = document.getElementById('pre-live-logs');
+
+  async function refreshDiagHeader() {
+    try {
+      const res = await fetch('/api/system/diagnostic');
+      if (res.ok) {
+        const data = await res.json();
+        if (diagEnv) diagEnv.textContent = `SkyMosaic v${data.version}`;
+        if (diagArch) diagArch.textContent = `${data.platform?.system || ''} ${data.platform?.machine || ''}`;
+        const upMins = Math.floor((data.uptime_seconds || 0) / 60);
+        if (diagUptime) diagUptime.textContent = `${upMins}m (${Math.round(data.uptime_seconds || 0)}s)`;
+        const headerPill = document.getElementById('app-header-version-pill');
+        if (headerPill) headerPill.textContent = `v${data.version}`;
+        const sysBadge = document.getElementById('system-version-badge');
+        if (sysBadge) sysBadge.textContent = `v${data.version}`;
+      }
+    } catch (e) {
+      console.warn("Could not fetch diagnostic metadata:", e);
+    }
+  }
+
+  refreshDiagHeader();
+
+  btnCopy?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/system/diagnostic');
+      const data = await res.json();
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+      showToast('Diagnostics JSON copied to clipboard!', 'success');
+    } catch (e) {
+      showToast('Failed to copy diagnostics', 'error');
+    }
+  });
+
+  btnDownloadDiag?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/system/diagnostic');
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `skymosaic_diagnostics_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Downloaded diagnostic report!', 'success');
+    } catch (e) {
+      showToast('Failed to download diagnostics', 'error');
+    }
+  });
+
+  async function loadLogs() {
+    if (!preLogs) return;
+    preLogs.textContent = 'Loading container logs...';
+    try {
+      const res = await fetch('/api/system/logs?limit=250');
+      const text = await res.text();
+      preLogs.textContent = text || '(No logs available)';
+      preLogs.scrollTop = preLogs.scrollHeight;
+    } catch (e) {
+      preLogs.textContent = `Error fetching logs: ${e.message}`;
+    }
+  }
+
+  btnToggleLogs?.addEventListener('click', () => {
+    if (!containerLogs) return;
+    const isHidden = containerLogs.style.display === 'none';
+    containerLogs.style.display = isHidden ? 'block' : 'none';
+    btnToggleLogs.textContent = isHidden ? '🙈 Hide Container Logs' : '📜 View Live Container Logs';
+    if (isHidden) {
+      loadLogs();
+    }
+  });
+
+  btnRefreshLogs?.addEventListener('click', () => {
+    loadLogs();
+  });
+
+  btnDownloadLogs?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/system/logs?limit=500');
+      const text = await res.text();
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `skymosaic_logs_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Downloaded container logs!', 'success');
+    } catch (e) {
+      showToast('Failed to download logs', 'error');
+    }
+  });
+}
+
 
 

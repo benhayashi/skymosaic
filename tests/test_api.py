@@ -117,3 +117,24 @@ def test_api_camera_flip():
     assert res2.json()["flip_horizontal"] is False
 
 
+def test_system_diagnostics_and_logs():
+    v_res = client.get("/api/system/version")
+    assert v_res.status_code == 200
+    v_data = v_res.json()
+    assert "version" in v_data
+    assert v_data["version"] == "1.0.6"
+
+    d_res = client.get("/api/system/diagnostic")
+    assert d_res.status_code == 200
+    d_data = d_res.json()
+    assert d_data["version"] == "1.0.6"
+    assert "cameras_status" in d_data
+    assert "platform" in d_data
+    assert "uptime_seconds" in d_data
+
+    l_res = client.get("/api/system/logs")
+    assert l_res.status_code == 200
+    assert "text/plain" in l_res.headers["content-type"]
+
+
+

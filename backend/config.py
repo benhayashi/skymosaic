@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
+APP_VERSION = "1.0.6"
+
 
 class LensModelType(str, Enum):
     RECTILINEAR = "rectilinear"

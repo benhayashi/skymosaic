@@ -86,6 +86,11 @@ class OpticalTrackerEngine:
         self.vision_every_n = 5
         self.weather_every_n = 10
 
+    @property
+    def tracks(self) -> Dict[int, OpticalTrack]:
+        with self._lock:
+            return dict(self._tracks)
+
     def set_camera_sizes(self, sizes: Dict[str, Tuple[int, int]]) -> None:
         """Provides native camera frame sizes so obstacle masks are projected with the right aspect."""
         self._cam_sizes = dict(sizes)

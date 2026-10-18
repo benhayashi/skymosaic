@@ -1,6 +1,9 @@
 import datetime
+import logging
 import os
 from pathlib import Path
+import platform
+import time
 from typing import Dict, List, Optional
 import cv2
 from fastapi import FastAPI, HTTPException, Query, Response, UploadFile, File
@@ -9,6 +12,12 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import numpy as np
+
+from backend.config import APP_VERSION
+from backend.logging_buffer import log_buffer
+
+logger = logging.getLogger("SkyMosaic")
+STARTUP_TIME = time.time()
 
 from backend.astrometry.celestial import (
     BRIGHT_STARS,
@@ -302,6 +311,10 @@ def flip_camera(camera_id: str, req: Optional[FlipCameraRequest] = None):
             stitcher.update_config(app_config)
             tracker_engine.update_config(app_config)
             composite_worker.invalidate_cache()
+            logger.info(
+                f"[FLIP] Camera '{camera_id}' toggled (axis={axis}) -> "
+                f"flip_h={cam.flip_horizontal}, flip_v={cam.flip_vertical}"
+            )
             return {
                 "status": "ok",
                 "flip_horizontal": cam.flip_horizontal,
@@ -753,6 +766,71 @@ def trigger_storage_sync():
 def trigger_storage_prune():
     count = storage_manager.prune_old_files()
     return {"status": "ok", "pruned_files": count}
+
+
+@app.get("/api/system/version")
+def get_system_version():
+    return {
+        "version": APP_VERSION,
+        "name": "SkyMosaic AllSky System",
+        "arch": platform.machine(),
+        "system": platform.system()
+    }
+
+
+@app.get("/api/system/diagnostic")
+def get_system_diagnostic():
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    cameras_status = []
+    for cam in app_config.cameras:
+        handler = stream_manager.handlers.get(cam.id)
+        frame = handler.latest_frame if handler else None
+        cameras_status.append({
+            "id": cam.id,
+            "name": cam.name,
+            "enabled": cam.enabled,
+            "source_type": cam.source_type.value,
+            "url_or_path": cam.url_or_path,
+            "flip_horizontal": cam.flip_horizontal,
+            "flip_vertical": cam.flip_vertical,
+            "is_running": getattr(handler, "_running", False) if handler else False,
+            "has_frame": frame is not None,
+            "frame_shape": list(frame.shape) if frame is not None else None,
+        })
+
+    lut_cam_ids = list(stitcher._lut_cache.keys())
+    return {
+        "version": APP_VERSION,
+        "server_time_utc": now_utc.isoformat(),
+        "uptime_seconds": round(time.time() - STARTUP_TIME, 1),
+        "platform": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+            "python_version": platform.python_version(),
+            "opencv_version": cv2.__version__,
+        },
+        "config": app_config.model_dump(),
+        "cameras_status": cameras_status,
+        "stitching_status": {
+            "projection": stitcher.config.stitching.projection.value,
+            "canvas_size": stitcher.config.stitching.canvas_size,
+            "cached_lut_cameras": lut_cam_ids,
+            "has_valid_mask": stitcher._valid_canvas_mask is not None,
+            "valid_mask_pixels": int(np.count_nonzero(stitcher._valid_canvas_mask)) if stitcher._valid_canvas_mask is not None else 0
+        },
+        "tracking_status": {
+            "tracks_count": len(tracker_engine.tracks),
+        },
+        "recent_logs": log_buffer.get_logs(limit=150)
+    }
+
+
+@app.get("/api/system/logs")
+def get_system_logs(limit: int = 250):
+    text = log_buffer.get_text(limit=limit)
+    return Response(content=text, media_type="text/plain")
+
 
 
 # Mount data directory for direct asset serving

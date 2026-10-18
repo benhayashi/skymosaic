@@ -19,7 +19,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: skymosaic:latest
+    image: ghcr.io/benhayashi/skymosaic:latest
+    pull_policy: always
     container_name: skymosaic
     restart: unless-stopped
     ports:
