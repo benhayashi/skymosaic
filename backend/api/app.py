@@ -301,6 +301,7 @@ def flip_camera(camera_id: str, req: Optional[FlipCameraRequest] = None):
             stream_manager.update_config(app_config)
             stitcher.update_config(app_config)
             tracker_engine.update_config(app_config)
+            composite_worker.invalidate_cache()
             return {
                 "status": "ok",
                 "flip_horizontal": cam.flip_horizontal,
@@ -319,6 +320,7 @@ def update_camera(camera_id: str, updated_cam: CameraConfig):
             stream_manager.update_config(app_config)
             stitcher.update_config(app_config)
             tracker_engine.update_config(app_config)
+            composite_worker.invalidate_cache()
             return {"status": "ok", "camera": updated_cam}
     raise HTTPException(status_code=404, detail="Camera not found.")
 

@@ -94,7 +94,9 @@
           1.0
         ]
       ],
-      "gain_scale": 1.0
+      "gain_scale": 1.0,
+      "flip_horizontal": true,
+      "flip_vertical": false
     },
     {
       "id": "cam_southwest",

@@ -303,7 +303,8 @@ window.toggleCameraFlip = async function(cameraId, axis) {
       const stateV = data.flip_vertical ? 'ON' : 'OFF';
       showToast(`Camera flipped! H-Flip: ${stateH}, V-Flip: ${stateV}`, 'success');
       await loadCameras();
-      skyViewer.render();
+      skyViewer?.fetchFrame();
+      skyViewer?.render();
     } else {
       showToast('Failed to toggle camera flip', 'error');
     }
@@ -774,6 +775,18 @@ function initActionButtons() {
     }
   });
 
+  document.getElementById('btn-quick-flip-feed')?.addEventListener('click', async () => {
+    // Find active camera to flip (prefer southeast camera or first active camera)
+    const targetCam = camerasList.find(c => c.config.id === 'cam_southeast') ||
+                     camerasList.find(c => c.config.enabled) ||
+                     camerasList[0];
+    if (targetCam) {
+      await window.toggleCameraFlip(targetCam.config.id, 'horizontal');
+    } else {
+      showToast('No cameras configured to flip', 'warning');
+    }
+  });
+
   initZoomControls();
   initDvrControls();
 }
@@ -783,10 +796,14 @@ function initZoomControls() {
   document.getElementById('btn-drag-mode')?.addEventListener('click', () => {
     skyViewer?.toggleDragMode();
     const mode = skyViewer?.dragMode;
-    if (mode === 'rotate') {
-      showToast('Drag Mode: Rotate Dome (Drag anywhere on sky to rotate)', 'info');
+    if (mode === 'smart') {
+      showToast('Drag Mode: Dual-Zone (Inside Dome: Pan ✋ | Outside: Rotate 🔄)', 'info');
+    } else if (mode === 'smart_reverse') {
+      showToast('Drag Mode: Inverted Dual-Zone (Inside Dome: Rotate 🔄 | Outside: Pan ✋)', 'info');
+    } else if (mode === 'rotate') {
+      showToast('Drag Mode: Rotate Dome Everywhere 🔄', 'info');
     } else {
-      showToast('Drag Mode: Pan / Translate (Drag to reposition view)', 'info');
+      showToast('Drag Mode: Pan / Translate Everywhere ✋', 'info');
     }
   });
 

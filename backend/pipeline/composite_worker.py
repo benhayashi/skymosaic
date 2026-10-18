@@ -52,6 +52,14 @@ class CompositeWorker:
     def stop(self) -> None:
         self._running = False
 
+    def invalidate_cache(self) -> None:
+        """Forces immediate invalidation of the composite image and encoded JPEGs (e.g. after camera flips or recalibration)."""
+        with self._lock:
+            self._clean = None
+            self._clean_time = 0.0
+            self._generation += 1
+            self._jpeg_cache.clear()
+
     # ---------------- accessors ----------------
     def get_clean_composite(self) -> Optional[np.ndarray]:
         """Returns a copy of the latest clean composite (no overlays), stitching on-demand if none yet."""

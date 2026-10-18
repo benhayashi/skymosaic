@@ -22,11 +22,19 @@ class SkyViewer {
     this.panX = 0.0;
     this.panY = 0.0;
     this.rotationDeg = 0.0; // 0 = North up, positive = clockwise
-    this.dragMode = 'rotate'; // 'rotate' (default: drag rotates dome) or 'pan' (drag translates)
+    // dragMode options:
+    // 'smart': Inside dome = Pan / Translate, Outside dome = Rotate
+    // 'smart_reverse': Inside dome = Rotate, Outside dome = Pan / Translate
+    // 'pan': Pan everywhere
+    // 'rotate': Rotate everywhere
+    this.dragMode = 'smart';
     this.isDragging = false;
     this.isRotating = false;
+    this.activeDragAction = null; // 'pan' or 'rotate' for the ongoing gesture
     this.dragStartX = 0;
     this.dragStartY = 0;
+    this.panBaseX = 0;
+    this.panBaseY = 0;
     this.rotateStartAngle = 0;
     this.rotateBaseDeg = 0;
     this.lastTouchDist = null;
@@ -54,13 +62,23 @@ class SkyViewer {
   }
 
   setDragMode(mode) {
-    this.dragMode = mode === 'pan' ? 'pan' : 'rotate';
+    this.dragMode = mode;
     this.updateZoomUI();
     this.updateCursor();
   }
 
   toggleDragMode() {
-    this.setDragMode(this.dragMode === 'rotate' ? 'pan' : 'rotate');
+    // Cycle between standard dual-zone ('smart': inside pan, outside rotate)
+    // and inverted dual-zone ('smart_reverse': inside rotate, outside pan)
+    if (this.dragMode === 'smart') {
+      this.setDragMode('smart_reverse');
+    } else if (this.dragMode === 'smart_reverse') {
+      this.setDragMode('pan');
+    } else if (this.dragMode === 'pan') {
+      this.setDragMode('rotate');
+    } else {
+      this.setDragMode('smart');
+    }
   }
 
   setWeatherConditions(info) {
@@ -109,14 +127,21 @@ class SkyViewer {
   initPanZoomEvents() {
     if (!this.canvas) return;
 
-    // 1. Mouse Wheel Zoom (Anchored to Cursor)
+    // 1. Mouse Wheel Zoom (Anchored to Cursor Position)
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
 
       const rect = this.canvas.getBoundingClientRect();
-      // Mouse position relative to canvas center
-      const mouseX = (e.clientX - rect.left) - (rect.width / 2);
-      const mouseY = (e.clientY - rect.top) - (rect.height / 2);
+      const scaleX = this.canvas.width / rect.width;
+      const scaleY = this.canvas.height / rect.height;
+
+      // Cursor position in internal canvas coordinates
+      const sx = (e.clientX - rect.left) * scaleX;
+      const sy = (e.clientY - rect.top) * scaleY;
+
+      // Center of canvas
+      const cx = this.canvas.width / 2;
+      const cy = this.canvas.height / 2;
 
       const zoomFactor = e.deltaY < 0 ? 1.18 : (1.0 / 1.18);
       const oldZoom = this.zoom;
@@ -128,13 +153,14 @@ class SkyViewer {
       }
 
       if (newZoom !== oldZoom) {
-        // Shift pan so that the coordinate under mouse pointer stays under mouse pointer
         if (newZoom === 1.0) {
           this.panX = 0;
           this.panY = 0;
         } else {
-          this.panX = mouseX - (mouseX - this.panX) * (newZoom / oldZoom);
-          this.panY = mouseY - (mouseY - this.panY) * (newZoom / oldZoom);
+          // Keep screen position sx, sy anchored to the same point on the sky dome
+          // Formula is invariant under dome rotation:
+          this.panX = (sx - cx) - (newZoom / oldZoom) * (sx - cx - this.panX);
+          this.panY = (sy - cy) - (newZoom / oldZoom) * (sy - cy - this.panY);
         }
         this.zoom = newZoom;
         this.updateZoomUI();
@@ -147,56 +173,105 @@ class SkyViewer {
       e.preventDefault();
     });
 
-    // 2. Mouse Drag:
-    // Drag mode can be 'rotate' (default: drag rotates dome) or 'pan' (drag translates view).
-    // Holding Shift/Alt or using Right-Click / Middle-Click temporarily toggles Pan vs Rotate.
-    this.canvas.addEventListener('mousedown', (e) => {
+    // Helper: Determine if coordinates are inside dome horizon circle
+    const isInsideDome = (clientX, clientY) => {
       const rect = this.canvas.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2 + this.panX;
-      const cy = rect.top + rect.height / 2 + this.panY;
+      const scaleX = this.canvas.width / rect.width;
+      const scaleY = this.canvas.height / rect.height;
+      const sx = (clientX - rect.left) * scaleX;
+      const sy = (clientY - rect.top) * scaleY;
+      const cx = this.canvas.width / 2 + this.panX;
+      const cy = this.canvas.height / 2 + this.panY;
+      const domeRadius = (this.canvas.width / 2) * 0.95 * this.zoom;
+      return Math.hypot(sx - cx, sy - cy) <= domeRadius;
+    };
 
-      // Determine effective mode for this drag
-      let effectiveMode = this.dragMode;
-      if (e.shiftKey || e.altKey || e.button === 2 || e.button === 1) {
-        effectiveMode = (effectiveMode === 'rotate') ? 'pan' : 'rotate';
+    // Helper: Resolve effective action ('pan' or 'rotate') based on mode and location
+    const resolveAction = (clientX, clientY, isShiftAltOrSecondary) => {
+      const inside = isInsideDome(clientX, clientY);
+      let action = 'pan';
+
+      if (this.dragMode === 'smart') {
+        // Mode A (Default): Inside = Pan/Translate, Outside = Rotate
+        action = inside ? 'pan' : 'rotate';
+      } else if (this.dragMode === 'smart_reverse') {
+        // Mode B (Vice-Versa): Inside = Rotate, Outside = Pan/Translate
+        action = inside ? 'rotate' : 'pan';
+      } else if (this.dragMode === 'pan') {
+        action = 'pan';
+      } else if (this.dragMode === 'rotate') {
+        action = 'rotate';
       }
 
-      if (effectiveMode === 'rotate') {
-        // Dome Rotation Drag
+      // Modifier key or right/middle click toggles action
+      if (isShiftAltOrSecondary) {
+        action = (action === 'pan') ? 'rotate' : 'pan';
+      }
+      return action;
+    };
+
+    // 2. Mouse Drag (Dual-Zone Pan & Rotate)
+    this.canvas.addEventListener('mousedown', (e) => {
+      const isSecondary = (e.shiftKey || e.altKey || e.button === 2 || e.button === 1);
+      const action = resolveAction(e.clientX, e.clientY, isSecondary);
+      this.activeDragAction = action;
+
+      const rect = this.canvas.getBoundingClientRect();
+      const scaleX = this.canvas.width / rect.width;
+      const scaleY = this.canvas.height / rect.height;
+      const sx = (e.clientX - rect.left) * scaleX;
+      const sy = (e.clientY - rect.top) * scaleY;
+      const cx = this.canvas.width / 2 + this.panX;
+      const cy = this.canvas.height / 2 + this.panY;
+
+      if (action === 'rotate') {
         e.preventDefault();
         this.isRotating = true;
         this.isDragging = false;
-        this.rotateStartAngle = Math.atan2(e.clientY - cy, e.clientX - cx);
+        this.rotateStartAngle = Math.atan2(sy - cy, sx - cx);
         this.rotateBaseDeg = this.rotationDeg;
         this.canvas.style.cursor = 'grabbing';
       } else {
-        // Canvas Pan / Translate Drag
+        // Pan
         this.isDragging = true;
         this.isRotating = false;
-        this.dragStartX = e.clientX - this.panX;
-        this.dragStartY = e.clientY - this.panY;
+        this.dragStartX = e.clientX;
+        this.dragStartY = e.clientY;
+        this.panBaseX = this.panX;
+        this.panBaseY = this.panY;
         this.canvas.style.cursor = 'grabbing';
       }
     });
 
-    // Update hover cursor
+    // Update hover cursor based on active dual zone
     this.canvas.addEventListener('mousemove', (e) => {
       if (!this.isDragging && !this.isRotating) {
-        this.canvas.style.cursor = 'grab';
+        const action = resolveAction(e.clientX, e.clientY, false);
+        this.canvas.style.cursor = (action === 'rotate') ? 'crosshair' : 'grab';
       }
     });
 
     window.addEventListener('mousemove', (e) => {
       if (this.isRotating) {
         const rect = this.canvas.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2 + this.panX;
-        const cy = rect.top + rect.height / 2 + this.panY;
-        const currentAngle = Math.atan2(e.clientY - cy, e.clientX - cx);
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        const sx = (e.clientX - rect.left) * scaleX;
+        const sy = (e.clientY - rect.top) * scaleY;
+        const cx = this.canvas.width / 2 + this.panX;
+        const cy = this.canvas.height / 2 + this.panY;
+
+        const currentAngle = Math.atan2(sy - cy, sx - cx);
         const deltaAngleDeg = (currentAngle - this.rotateStartAngle) * (180.0 / Math.PI);
         this.setRotation(this.rotateBaseDeg + deltaAngleDeg);
       } else if (this.isDragging) {
-        this.panX = e.clientX - this.dragStartX;
-        this.panY = e.clientY - this.dragStartY;
+        const rect = this.canvas.getBoundingClientRect();
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        const dx = (e.clientX - this.dragStartX) * scaleX;
+        const dy = (e.clientY - this.dragStartY) * scaleY;
+        this.panX = this.panBaseX + dx;
+        this.panY = this.panBaseY + dy;
         this.render();
       }
     });
@@ -205,6 +280,7 @@ class SkyViewer {
       if (this.isDragging || this.isRotating) {
         this.isDragging = false;
         this.isRotating = false;
+        this.activeDragAction = null;
         this.updateCursor();
       }
     });
@@ -215,31 +291,39 @@ class SkyViewer {
     });
 
     // 4. Touch Gestures:
-    // Single finger = smart/pan/rotate
+    // Single finger = Smart Dual-Zone (or configured drag mode)
     // Two fingers = Pinch-to-zoom AND twist rotation simultaneously
     this.canvas.addEventListener('touchstart', (e) => {
-      const rect = this.canvas.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2 + this.panX;
-      const cy = rect.top + rect.height / 2 + this.panY;
-      const domeRadius = (Math.min(rect.width, rect.height) / 2) * this.zoom;
-
       if (e.touches.length === 1) {
-        let effectiveMode = this.dragMode;
+        const touch = e.touches[0];
+        const action = resolveAction(touch.clientX, touch.clientY, false);
+        this.activeDragAction = action;
 
-        if (effectiveMode === 'rotate') {
+        const rect = this.canvas.getBoundingClientRect();
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        const sx = (touch.clientX - rect.left) * scaleX;
+        const sy = (touch.clientY - rect.top) * scaleY;
+        const cx = this.canvas.width / 2 + this.panX;
+        const cy = this.canvas.height / 2 + this.panY;
+
+        if (action === 'rotate') {
           this.isRotating = true;
           this.isDragging = false;
-          this.rotateStartAngle = Math.atan2(e.touches[0].clientY - cy, e.touches[0].clientX - cx);
+          this.rotateStartAngle = Math.atan2(sy - cy, sx - cx);
           this.rotateBaseDeg = this.rotationDeg;
         } else {
           this.isDragging = true;
           this.isRotating = false;
-          this.dragStartX = e.touches[0].clientX - this.panX;
-          this.dragStartY = e.touches[0].clientY - this.panY;
+          this.dragStartX = touch.clientX;
+          this.dragStartY = touch.clientY;
+          this.panBaseX = this.panX;
+          this.panBaseY = this.panY;
         }
       } else if (e.touches.length === 2) {
         this.isDragging = false;
         this.isRotating = false;
+        this.activeDragAction = null;
         const dx = e.touches[1].clientX - e.touches[0].clientX;
         const dy = e.touches[1].clientY - e.touches[0].clientY;
         this.lastTouchDist = Math.hypot(dx, dy);
@@ -250,16 +334,26 @@ class SkyViewer {
 
     this.canvas.addEventListener('touchmove', (e) => {
       if (e.touches.length === 1) {
+        const touch = e.touches[0];
         if (this.isRotating) {
           const rect = this.canvas.getBoundingClientRect();
-          const cx = rect.left + rect.width / 2 + this.panX;
-          const cy = rect.top + rect.height / 2 + this.panY;
-          const currentAngle = Math.atan2(e.touches[0].clientY - cy, e.touches[0].clientX - cx);
+          const scaleX = this.canvas.width / rect.width;
+          const scaleY = this.canvas.height / rect.height;
+          const sx = (touch.clientX - rect.left) * scaleX;
+          const sy = (touch.clientY - rect.top) * scaleY;
+          const cx = this.canvas.width / 2 + this.panX;
+          const cy = this.canvas.height / 2 + this.panY;
+          const currentAngle = Math.atan2(sy - cy, sx - cx);
           const deltaAngleDeg = (currentAngle - this.rotateStartAngle) * (180.0 / Math.PI);
           this.setRotation(this.rotateBaseDeg + deltaAngleDeg);
         } else if (this.isDragging) {
-          this.panX = e.touches[0].clientX - this.dragStartX;
-          this.panY = e.touches[0].clientY - this.dragStartY;
+          const rect = this.canvas.getBoundingClientRect();
+          const scaleX = this.canvas.width / rect.width;
+          const scaleY = this.canvas.height / rect.height;
+          const dx = (touch.clientX - this.dragStartX) * scaleX;
+          const dy = (touch.clientY - this.dragStartY) * scaleY;
+          this.panX = this.panBaseX + dx;
+          this.panY = this.panBaseY + dy;
           this.render();
         }
       } else if (e.touches.length === 2) {
@@ -382,15 +476,25 @@ class SkyViewer {
 
     const modeBtn = document.getElementById('btn-drag-mode');
     if (modeBtn) {
-      if (this.dragMode === 'rotate') {
+      if (this.dragMode === 'smart') {
+        modeBtn.innerHTML = '✋⭕';
+        modeBtn.title = 'Mouse Drag: Dual-Zone (Inside: Pan ✋ | Outside: Rotate 🔄). Click to invert to (Inside: Rotate | Outside: Pan).';
+        modeBtn.classList.remove('pan-active', 'rotate-active');
+        modeBtn.classList.add('smart-active');
+      } else if (this.dragMode === 'smart_reverse') {
+        modeBtn.innerHTML = '🔄⭕';
+        modeBtn.title = 'Mouse Drag: Inverted Dual-Zone (Inside: Rotate 🔄 | Outside: Pan ✋). Click to cycle mode.';
+        modeBtn.classList.remove('pan-active', 'rotate-active');
+        modeBtn.classList.add('smart-active');
+      } else if (this.dragMode === 'rotate') {
         modeBtn.innerHTML = '🔄';
-        modeBtn.title = 'Mouse Drag: Rotate Dome (Active). Click to switch to Pan / Translate (or Shift-Drag to pan).';
-        modeBtn.classList.remove('pan-active');
+        modeBtn.title = 'Mouse Drag: Rotate Dome Everywhere. Click to cycle mode.';
+        modeBtn.classList.remove('pan-active', 'smart-active');
         modeBtn.classList.add('rotate-active');
       } else {
         modeBtn.innerHTML = '✋';
-        modeBtn.title = 'Mouse Drag: Pan / Translate (Active). Click to switch to Rotate Dome.';
-        modeBtn.classList.remove('rotate-active');
+        modeBtn.title = 'Mouse Drag: Pan / Translate Everywhere. Click to cycle mode.';
+        modeBtn.classList.remove('rotate-active', 'smart-active');
         modeBtn.classList.add('pan-active');
       }
     }
